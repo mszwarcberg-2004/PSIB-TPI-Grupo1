@@ -218,3 +218,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# Agregamos para este TP:
+
+# Recortes y mascaras generadas
+data/shared/gt/
+data/shared/pred/
+
+# Archivos propios de macOS
+.DS_Store

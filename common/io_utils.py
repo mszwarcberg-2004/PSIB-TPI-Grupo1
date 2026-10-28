@@ -1,0 +1,1 @@
+# Función del archivo: contiene funciones compartidas para leer imágenes y las anotaciones del GT (coordenadas de los eritrocitos y etiquetas de clasificación: infectado o no)
