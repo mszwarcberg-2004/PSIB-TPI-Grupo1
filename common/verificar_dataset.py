@@ -3,8 +3,8 @@
 
 #Imports
 from collections import Counter #permite contar cuantas veces aparece cada valor
-from common.io_utils import cargar_subset, obtener_rutas, cargar_gt
-
+from io_utils import cargar_subset, obtener_rutas, cargar_gt
+from config import SUBSET_CSV
 
 # Cargar la lista de imágenes seleccionadas
 imagenes = cargar_subset()
@@ -31,23 +31,32 @@ for imagen in imagenes:
 
     #Para recordar: en anotaciones, para cada célula guardamos un diccionario con: {    "cell_id": cell_id,    "label": clasificación parasitado o no,    "polygon": puntos})
 
-    # Contar las células de cada clase
+    # Contar las células de cada clase: Counter recorre las etiquetas y cuenta cuántas veces aparece cada una.
     conteo = Counter(a["label"] for a in anotaciones) #recorremos las anotaciones de una clase y contamos cuántas células hay de cada clase
 
+    #El resultado sería:
+    #conteo = {
+    #"Parasitized": 1,
+   # "Uninfected": 2
+   #}
+
+    #Acá estamos accediendo a los valores del contador --> Importante: estas cantidades pertenecen a una sóla imagen, estamos dentro del for. 
     n_parasitadas = conteo["Parasitized"]
     n_no_parasitadas = conteo["Uninfected"]
 
+    #+= es sumar un valor al que ya tenía la variable
     total_parasitadas += n_parasitadas
     total_no_parasitadas += n_no_parasitadas
 
-    # Registrar los pacientes de cada conjunto
+    # Registrar los pacientes de cada conjunto: train o test
     if split == "train":
         pacientes_train.add(patient_id)
     elif split == "test":
         pacientes_test.add(patient_id)
     else:
         raise ValueError(f"Split no válido: {split}")
-
+    
+    #Imprimimos la información de cada imagen
     print(f"\nPaciente: {patient_id}")
     print(f"Imagen: {image_id}")
     print(f"Conjunto: {split}")
@@ -56,7 +65,7 @@ for imagen in imagenes:
     print(f"No parasitadas: {n_no_parasitadas}")
 
 
-# Verificar que ningún paciente esté en ambos conjuntos
+# Verificar que ningún paciente esté en ambos conjuntos --> intersection busca los pacientes que están en ambos conjuntos
 pacientes_repetidos = pacientes_train.intersection(pacientes_test)
 
 if pacientes_repetidos:
@@ -65,7 +74,7 @@ if pacientes_repetidos:
     )
 
 
-# Mostrar el resumen final
+# Mostrar el resumen final del dataset
 print("\nRESUMEN DEL DATASET")
 print("Imágenes totales:", len(imagenes))
 print("Pacientes de entrenamiento:", len(pacientes_train))

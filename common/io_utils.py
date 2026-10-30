@@ -1,11 +1,12 @@
 # Función del archivo: contiene funciones compartidas para cargar imágenes y gt del dataset.
 
 #Imports
-from common.config import SELECTED_DIR #importo la variable SELECTED_DIR con la ruta hasta raw, donde están los datos
+from config import SELECTED_DIR, SUBSET_CSV 
+#importo la variable SELECTED_DIR con la ruta hasta raw, donde están los datos
+#importar la variable SUBSET_CVS con la ruta hasta el subset.csv, que tiene toda la info de las imágenes que procesamos
 import cv2
 import csv
 import numpy as np
-from common.config import SUBSET_CSV #importar la variable SUBSET_CVS con la ruta hasta el subset.csv, que tiene toda la info de las imágenes que procesamos
 
 #Función para obtener las rutas y encontrar las imagenes y el gt de los distintos pacientes. 
 def obtener_rutas(patient_id, image_id):
@@ -131,14 +132,17 @@ def cargar_subset(split=None):
 
         imagenes = list(lector) #lista que contiene a todos los diccionarios, cada uno correspondiente a una fila (es decir, a una imagen)
 
-    # Filtrar por train o test, si se solicita
-    filtradas = []
+    # Filtrar por train o test solamente si se solicita
+    if split is not None:
+        filtradas = []
 
-    for imagen in imagenes:
-        if imagen["split"] == split:
-            filtradas.append(imagen)
-    imagenes = filtradas
+        for imagen in imagenes:
+            if imagen["split"] == split:
+                filtradas.append(imagen)
+
+        imagenes = filtradas
 
     #Por ejemplo: si pusimos 'train' en la columna split, conserva sólo los diccionarios cuya columna split sea 'train'
 
-    return imagenes #devuelve la lista con todos los registros del csv para las imagenes solicitadas: sus nombres, los pacientes a los que pertenecen y si son de entrenamiento o prueba.
+    return imagenes
+   

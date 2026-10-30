@@ -228,3 +228,5 @@ data/shared/pred/
 
 # Archivos propios de macOS
 .DS_Store
+
+.vscode/
