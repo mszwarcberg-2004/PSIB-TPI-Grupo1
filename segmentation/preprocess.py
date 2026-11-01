@@ -36,3 +36,44 @@ def mascara_circular(imagen_rgb): #imagen RGB, es decir, una matriz NumPy de dim
     # Erosionamos para achicar el circulo unos píxeles cerca del borde circular, donde pueden aparecer artefactos de la imagen.
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * MARGEN + 1, 2 * MARGEN + 1))
     return cv2.erode(campo, kernel).astype(bool)
+
+
+# CORRECCIÓN DE ILUMINACIÓN: para que la imagen tenga iluminación uniforme.
+# Si una zona de la imagen está más oscura que otra por la iluminación del microscopio, esto puede afectar el umbral global de Otsu.
+def corregir_iluminacion(verde, campo):
+
+    # Convertimos la imagen y la máscara a float
+    imagen = verde.astype(np.float32)
+    mascara = campo.astype(np.float32)
+
+    # Estimamos la iluminación local mediante un suavizado amplio.
+    # Normalizamos por la máscara para no incluir el borde negro.
+    numerador = cv2.GaussianBlur(imagen * mascara, (0, 0), sigmaX=60)
+    denominador = cv2.GaussianBlur(mascara, (0, 0), sigmaX=60)
+
+    fondo = numerador / np.maximum(denominador, 1e-6)
+
+    # Compensamos las diferencias de brillo respecto al fondo estimado para que la imagen tenga iluminación más uniforme
+    referencia = np.median(fondo[campo])
+    corregida = imagen - fondo + referencia
+
+    # Mantener intensidades válidas entre 0 y 255
+    return np.clip(corregida, 0, 255).astype(np.uint8) 
+#La función devuelve una imagen en escala de grises (canal verde) con las variaciones de iluminación compensadas.
+
+
+# MEJORA DE CONTRASTE LOCAL MEDIANTE CLAHE, considerando distintas zonas de la imagen.
+def mejorar_contraste_clahe(verde, campo):
+
+    # Evitar que el borde negro afecte el contraste
+    imagen = verde.copy()
+    imagen[~campo] = int(np.median(verde[campo]))
+
+    # Crear y aplicar CLAHE
+    clahe = cv2.createCLAHE(
+        clipLimit=2.0,
+        tileGridSize=(8, 8)
+    )
+
+    return clahe.apply(imagen)
+#La función devuelve una imagen en escala de grises (canal verde) con el contraste local modificado.
