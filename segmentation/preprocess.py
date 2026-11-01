@@ -77,3 +77,27 @@ def mejorar_contraste_clahe(verde, campo):
 
     return clahe.apply(imagen)
 #La función devuelve una imagen en escala de grises (canal verde) con el contraste local modificado.
+
+
+# Preprocesamiento general reutilizable por distintos métodos de segmentación.
+def preprocesar_imagen(imagen_rgb, aplicar_clahe=False, aplicar_gaussiano=False):
+
+    # 1. Obtener la máscara del campo circular
+    campo = mascara_circular(imagen_rgb)
+
+    # 2. Crear una copia para conservar la imagen original intacta
+    imagen_preprocesada = imagen_rgb.copy()
+
+    # 3. Aplicar CLAHE al canal verde si se solicita
+    if aplicar_clahe:
+        verde = imagen_preprocesada[:, :, 1]
+        verde_clahe = mejorar_contraste_clahe(verde, campo)
+        imagen_preprocesada[:, :, 1] = verde_clahe
+
+    # 4. Aplicar filtro gaussiano si se solicita
+    if aplicar_gaussiano:
+        imagen_preprocesada = cv2.GaussianBlur(
+            imagen_preprocesada, (5, 5), 0
+        )
+
+    return imagen_preprocesada, campo

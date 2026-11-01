@@ -13,13 +13,19 @@ HUECO_MAX = 1500      # área máxima (en píxeles) de un hueco que se rellena (
 
 #Otsu es el método de referencia. 
 #Aplicamos otsu sobre el canal verde porque en imágenes de frotis sanguíneos teñidos con Giemsa, el canal verde puede presentar un contraste útil entre los eritrocitos rosados y el fondo claro.
-def segmentar_otsu_verde(imagen_rgb, campo): #ingresa la imagen en rgb y la máscara circular de la imagen completa sin bordes. 
-    verde = cv2.GaussianBlur(imagen_rgb[:, :, 1], (5, 5), 0)  # se selecciona el canal verde canal y suavizamos aplicando un Filtro Gaussiano
-    umbral = threshold_otsu(verde[campo])                      # aplicamos Otsu y nos devuelve el umbral usando solo píxeles dentro del campo
-    mascara = (verde < umbral) & campo  #Selecciona los píxeles cuya intensidad verde es menor que el umbral (porque los eritrocitos son más oscuros que el fondo
-    #y exige que esos píxeles también pertenezcan a la máscara circular. 
-   
-    return mascara, umbral #devuelve la máscara de Otsu y el umbral
+def segmentar_otsu_verde(imagen_rgb, campo):
+
+    # Extraer el canal verde de la imagen ya preprocesada
+    verde = imagen_rgb[:, :, 1]
+
+    # Calcular el umbral de Otsu dentro del campo circular
+    umbral = threshold_otsu(verde[campo])
+
+    # Generar la máscara binaria
+    mascara = (verde < umbral) & campo
+
+    return mascara, umbral
+
 
 def _kernel(tamano): #Esta función crea un elemento estructurante elíptico del tamaño indicado --> para luego aplicar operaciones morfológicas sobre la segmentación hecha con Otsu
     return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (tamano, tamano))

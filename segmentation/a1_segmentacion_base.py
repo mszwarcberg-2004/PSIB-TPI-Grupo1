@@ -5,38 +5,37 @@ import pandas as pd
 from common.config import rutas_segmentacion
 from common.io_utils import cargar_subset, cargar_imagen, cargar_gt
 from common.visualizar_gt import construir_mascara_gt
-from segmentation.preprocess import mascara_circular, mejorar_contraste_clahe
+from segmentation.preprocess import mascara_circular, preprocesar_imagen
 from segmentation.cluster_segmentation import segmentar_otsu_verde, limpiar_mascara
 from segmentation.etiquetado import etiquetar, filtrar_y_extraer
 from evaluacion.evaluacion import evaluar_segmentacion
 
 
-def procesar_imagen_base(imagen_rgb, patient_id, image_id, split, rutas): #procesa una imagen
+
+def procesar_imagen_otsu(imagen_rgb, patient_id, image_id, split, rutas): #procesa una imagen
 
     # 1. Obtener la máscara circular del microscopio
-    campo = mascara_circular(imagen_rgb)
+    # Utilizamos la función general de preprocesamiento
+    imagen_preprocesada, campo = preprocesar_imagen(
+        imagen_rgb,
+        aplicar_clahe=True,
+        aplicar_gaussiano=True
+    )
+    #dentro de esa función: se extrae el canal verde, se mejora el contraste local mediante CLAHE y aplica un filtro gaussiano sobre una copia de la original.
+   
+   
+    # Esta función selecciona el canal verde y calcula el umbral de Otsu
+    mascara_inicial, umbral = segmentar_otsu_verde(
+        imagen_preprocesada, campo
+    )
 
-    # 2. Extraer el canal verde
-    verde = imagen_rgb[:, :, 1]
-
-    # 3. Mejorar el contraste local mediante CLAHE
-    verde_clahe = mejorar_contraste_clahe(verde, campo)
-
-    # 4. Construir una imagen RGB auxiliar para usar la función de Otsu que ya tenemos programada
-    imagen_clahe = imagen_rgb.copy() #trabajamos con una copia de la imagen original
-    imagen_clahe[:, :, 1] = verde_clahe
-
-    # 5. Segmentar mediante Otsu
-    # Esta función selecciona el canal verde y aplica el filtro gaussiano
-    mascara_inicial, umbral = segmentar_otsu_verde(imagen_clahe, campo)
-
-    # 6. Aplicar apertura, cierre y relleno de huecos
+    # 3. Aplicar apertura, cierre y relleno de huecos
     mascara_limpia = limpiar_mascara(mascara_inicial)
 
-    # 7. Etiquetar los objetos de la máscara limpia
+    # 4. Etiquetar los objetos de la máscara limpia
     etiquetas = etiquetar(mascara_limpia)
 
-    # 8. Filtrar y extraer las células individuales
+    # 5. Filtrar y extraer las células individuales
     # Usamos la imagen RGB ORIGINAL para conservar sus colores reales
     filas, etiquetas_ok = filtrar_y_extraer(
         imagen_rgb, etiquetas, campo, patient_id, image_id, split, rutas
@@ -82,7 +81,7 @@ def segmentacion_base(split="train"): #procesa todas las imágenes
         imagen_rgb = cargar_imagen(patient_id, image_id)
 
         #Acá procesamos la imagen
-        filas, mascara_limpia = procesar_imagen_base(
+        filas, mascara_limpia = procesar_imagen_otsu(
             imagen_rgb, patient_id, image_id, imagen["split"], rutas
         ) #Ejecuta las etapas de segmentación sobre esa imagen
 
