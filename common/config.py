@@ -14,6 +14,9 @@ GT_DIR = SHARED_DIR / "gt" #ruta para entrar a gt
 PRED_DIR = SHARED_DIR / "pred" #ruta pra entrar 
 FEATURES_DIR = SHARED_DIR / "features"
 CHECK_DIR = SHARED_DIR / "gt_check"  # imágenes para verificar visualmente los polígonos del GT
+CELLS_PRED_CSV = PRED_DIR / "cells_pred.csv"  # lista de células de la segmentación propia
+CROPS_DIR = PRED_DIR / "crops"           # recortes {cell_id}.png
+MASKS_DIR = PRED_DIR / "masks"           # máscaras {cell_id}.png
 
 # Parametros generales
 SEED = 42 #fija la semilla para que las selecciones aleatorias se hagan siempre igual, entonces sea reproducible.
