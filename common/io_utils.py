@@ -1,7 +1,9 @@
 # Función del archivo: contiene funciones compartidas para cargar imágenes y gt del dataset.
+# IMPORTANTE: el algoritmo solo usa cargar_imagen(). cargar_gt() se usa únicamente en la verificación.
+
 
 #Imports
-from config import SELECTED_DIR, SUBSET_CSV 
+from common.config import SELECTED_DIR, SUBSET_CSV
 #importo la variable SELECTED_DIR con la ruta hasta raw, donde están los datos
 #importar la variable SUBSET_CVS con la ruta hasta el subset.csv, que tiene toda la info de las imágenes que procesamos
 import cv2
@@ -48,7 +50,9 @@ def cargar_imagen(patient_id, image_id):
     return imagen
 
 
-# Función para las anotaciones GT de una imagen
+# Función para las anotaciones GT de una imagen. Se conservan TODAS las filas, incluidos los glóbulos blancos (White_Blood_Cell).
+#Si una fila no trae un polígono válido (por ejemplo, los WBC), "polygon" vale None.
+
 def cargar_gt(patient_id, image_id):
 
     # Obtener la ruta del archivo GT
@@ -77,28 +81,36 @@ def cargar_gt(patient_id, image_id):
             n_vertices = int(fila[4]) #cantidad de vertices del polígono 
             #El GT no nos da directamente una imagen recortada de cada célula, sino los puntos que indican dónde está su contorno.
 
-            # Procesar solamente anotaciones de tipo polígono; si el tipo de anotación no es "polygon", salteamos esa fila.
-            if tipo.lower() != "polygon":
-                continue
 
-            # Obtener las coordenadas de los vértices
-            coordenadas = [float(valor) for valor in fila[5:]] #toma todos los valores desde la posición 5 hasta el final de la fila,
-            #los convierte a numero decimal y los guarda en una lsita que se llama coordenadas
+            # Obtener las coordenadas de los vértices. Coordenadas (x1, y1, x2, y2, ...). Si no se pueden leer, no hay polígono.
 
-            if len(coordenadas) != 2 * n_vertices:
-                raise ValueError(
-                    f"Cantidad de coordenadas incorrecta en {cell_id}"
-                )
-            #Si la cantidad de coordenadas no es el doble de la cantidad de vértices (debería ser el doble porque hay [x,y] para cada vértice), tira error
+            try: #try: intentar ejecutar el código. Si ocurre un error de tipo ValueError, se ejecuta el except 
+                coordenadas = [float(v) for v in fila[5:] if v.strip() != ""]  #toma todos los valores de la fila desde la posición 5, que corresponden a las coordenadas y convierte a decimales.
+                #guarda todos los números en la lista coordenadas
+            except ValueError: #si no se puede ejecutar, se guarda una lista vacía
+                coordenadas = []
 
-            # Agrupar las coordenadas en pares (x, y)
-            puntos = np.array(coordenadas).reshape(-1, 2) # Agrupa las coordenadas en pares (x, y); -1 calcula automáticamente la cantidad de filas, a partir de la cantidad de columnas y la cantidad de datos
+            polygon = None #inicialmente indicamos que no tenemos polígono. Si después encontramos coordenadas válidas, reemplazamos None por la matriz de coordenadas.
+
+            if n_vertices > 0 and len(coordenadas) == 2 * n_vertices: #haya exactamente dos coordenadas por vértice, una x y una y.
+                polygon = np.array(coordenadas).reshape(-1, 2) #convierte la lista en un arreglo de numpy con 2 columnas y las filas necesarías para 2 columnas (por eso el -1)
             
-            # Vamos guardando los datos de cada célula en un diccionario llamado anotaciones con tres claves: cell_id, label, y la matriz con las coordenadas de los puntos que forman el polígono
+            #Ejemplo: polygon = np.array([
+            #     [100.5, 200.0],
+            #     [150.0, 220.0],
+            #     [130.0, 250.0]            Cada fila representa un vértice del polígono de la célula.
+            # ])
+            
+            #Se evalúa elif cuando no se cumplió el if anterior
+            elif tipo.lower() == "polygon":
+                # Una fila declarada como polígono tiene que tener sus coordenadas completas
+                raise ValueError(f"Cantidad de coordenadas incorrecta en {cell_id}")
+
             anotaciones.append({
                 "cell_id": cell_id,
                 "label": label,
-                "polygon": puntos
+                "tipo": tipo,
+                "polygon": polygon,
             })
 
     # Comprobar la cantidad de anotaciones leídas
@@ -146,3 +158,13 @@ def cargar_subset(split=None):
 
     return imagenes
    
+
+#Función construir_cell_id sirve para crear un identificador único para cada célula del dataset, de manera que puedas guardar sus recortes, máscaras y características sin confundirlas con otras células.
+  
+def construir_cell_id(patient_id, image_id, indice): #indice: numero que le asignamos a esa célula dentro de la imagen. 
+    # Identificador único de una célula: {paciente}_{imagen sin extensión}_{n con 4 dígitos}.
+    # Ejemplo: 208C67P28N_ThinF_IMG_20150819_115417_0007
+    # Lo usan los tres bloques para nombrar recortes ({cell_id}.png), máscaras y filas de los CSV.
+    
+    return f"{patient_id}_{Path(image_id).stem}_{indice:04d}"
+#indice:04d: escribe el índice de la célula con cuatro dígitos, agregando ceros a la izquierda si es necesario.

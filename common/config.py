@@ -13,9 +13,14 @@ SUBSET_CSV = SHARED_DIR / "subset.csv" #ruta para entrar al subset.csv
 GT_DIR = SHARED_DIR / "gt" #ruta para entrar a gt
 PRED_DIR = SHARED_DIR / "pred" #ruta pra entrar 
 FEATURES_DIR = SHARED_DIR / "features"
+CHECK_DIR = SHARED_DIR / "gt_check"  # imágenes para verificar visualmente los polígonos del GT
 
 # Parametros generales
 SEED = 42 #fija la semilla para que las selecciones aleatorias se hagan siempre igual, entonces sea reproducible.
 SCALE = 1.0 #mantiene la resolución original de las imágenes.
-TEST_SIZE = 0.25 #que el 25% de las imagenes que analizamos pertenezcan al test y el 75% al train. Proporción de pacientes que separamos para test
+TEST_SIZE = 0.25 #proporción de imágenes reservadas para test
 
+# Nombres de las clases tal como aparecen en el GT
+LABEL_PARASITIZED = "Parasitized" 
+LABEL_UNINFECTED = "Uninfected"
+LABEL_WBC = "White_Blood_Cell"
