@@ -269,13 +269,6 @@ Pendiente:
 - Definición final de identificadores únicos y formatos de recortes y máscaras.
 - Unificación de imports para la integración del proyecto.
 
-### Próxima etapa
-
-Comenzar el desarrollo de los bloques A, B y C.
-
-El Bloque A generará inicialmente los recortes y máscaras individuales desde las anotaciones GT, permitiendo que los bloques B y C comiencen a trabajar con las características de textura y color.
-
-Posteriormente, se desarrollará la segmentación automática y se evaluará el pipeline completo.
 
 ## 6. Organización del trabajo
 

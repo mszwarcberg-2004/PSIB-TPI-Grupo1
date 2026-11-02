@@ -1,4 +1,3 @@
-
 # Función del archivo: evaluación de distintos métodos de segmentación.
 # Permite comparar una máscara predicha con el Ground Truth usando IoU y Dice.
 # Además, permite evaluar la detección individual de eritrocitos mediante matching.
@@ -52,9 +51,10 @@ def evaluar_segmentacion(mascara_pred, mascara_gt, campo=None): #mascara_pred: e
 
 
 
-def matriz_iou(gt, pred):
+def matriz_iou(gt, pred, devolver_conteos=False):
     """gt, pred: mapas de etiquetas (0 = fondo, 1..N = instancias).
-    Devuelve (iou[nG, nP], ids_gt, ids_pred)."""
+    Devuelve (iou[nG, nP], ids_gt, ids_pred).
+    Con devolver_conteos=True devuelve además (inter[nG, nP], area_gt, area_pred) en píxeles."""
 
     ids_g, g_idx = np.unique(gt, return_inverse=True)
     ids_p, p_idx = np.unique(pred, return_inverse=True)
@@ -87,20 +87,28 @@ def matriz_iou(gt, pred):
         M = np.where(union > 0, inter / union, 0.0)
 
     # Devolver la matriz de IoU sin incluir el fondo
+    if devolver_conteos:
+        return M[1:, 1:], ids_g[1:], ids_p[1:], inter[1:, 1:], area_g[1:], area_p[1:]
     return M[1:, 1:], ids_g[1:], ids_p[1:]
 
 
 
 
-def evaluar_imagen(gt, pred, umbral_iou=0.5):
+def evaluar_imagen(gt, pred, umbral_iou=0.5, campo=None):
     # Evalúa qué tan bien se detectó cada célula individualmente. Utiliza el IoU para asociar cada célula predicha con una célula del GT.
 
     # Verificar que ambas imágenes tengan las mismas dimensiones
     if gt.shape != pred.shape:
         raise ValueError("Los mapas de etiquetas deben tener el mismo tamaño")
 
-    # Calcular matriz de IoU entre todas las células
-    M, ids_g, ids_p = matriz_iou(gt, pred)
+    # Evaluar solo dentro del campo circular, si se indica
+    if campo is not None:
+        gt = np.where(campo, gt, 0)
+        pred = np.where(campo, pred, 0)
+
+    # Calcular matriz de IoU entre todas las células.
+    # Se piden también las intersecciones y áreas, que se usan abajo para el Dice de cada par
+    M, ids_g, ids_p, inter, area_g, area_p = matriz_iou(gt, pred, devolver_conteos=True)
 
     nG, nP = len(ids_g), len(ids_p)
 
@@ -117,20 +125,16 @@ def evaluar_imagen(gt, pred, umbral_iou=0.5):
             # Considerar una detección correcta si el IoU supera el umbral
             if M[i, j] >= umbral_iou:
 
-                # Construir las máscaras binarias de las dos células
-                a = gt == ids_g[i]
-                b = pred == ids_p[j]
-
-                # Calcular Dice entre ambas células utilizando la misma
-                # función de evaluación global que ya teníamos
-                metricas = evaluar_segmentacion(b, a)
+                # Dice del par, calculado con la intersección y las áreas que ya tenemos.
+                # Así no se recorre toda la imagen por cada célula (eso era lo que hacía lento el código)
+                dice_par = 2 * inter[i, j] / (area_g[i] + area_p[j])
 
                 # Guardar el par de células correctamente asociado
                 pares.append({
                     "gt_id": int(ids_g[i]),
                     "pred_id": int(ids_p[j]),
                     "iou": float(M[i, j]),
-                    "dice": metricas["Dice"]
+                    "dice": float(dice_par)
                 })
 
     # Verdaderos positivos: células correctamente emparejadas

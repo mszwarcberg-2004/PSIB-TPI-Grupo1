@@ -8,7 +8,7 @@ from common.visualizar_gt import construir_mascara_gt
 from segmentation.preprocess import mascara_circular, preprocesar_imagen
 from segmentation.cluster_segmentation import segmentar_otsu_verde, limpiar_mascara
 from segmentation.etiquetado import etiquetar, filtrar_y_extraer
-from evaluacion.seg_metrics import evaluar_segmentacion
+from texture_eval.seg_metrics import evaluar_segmentacion
 
 
 def procesar_imagen_otsu(imagen_rgb, patient_id, image_id, split, rutas): #procesa una imagen
