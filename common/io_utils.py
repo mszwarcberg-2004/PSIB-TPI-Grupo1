@@ -20,6 +20,11 @@ def obtener_rutas(patient_id, image_id):
     ruta_imagen = carpeta_paciente / "Img" / image_id
     ruta_gt = carpeta_paciente / "GT" / f"{ruta_imagen.stem}.txt" #ruta_imagen.stem: permite obtener la ruta del archivo sin la parte .jpg
 
+    # Algunos pacientes (208 y 209) tienen la carpeta escrita "Gt" en vez de "GT".
+    # En Mac da igual, pero en Linux o Colab se distinguen mayúsculas y no encontraría el archivo. Por eso, si no está en "GT", probamos con "Gt".
+    if not ruta_gt.is_file():
+        ruta_gt = carpeta_paciente / "Gt" / f"{ruta_imagen.stem}.txt"
+
     # Comprobar que ambos archivos existan
     if not ruta_imagen.is_file():
         raise FileNotFoundError(f"No se encontró la imagen: {ruta_imagen}")
@@ -169,3 +174,26 @@ def construir_cell_id(patient_id, image_id, indice): #indice: numero que le asig
     
     return f"{patient_id}_{Path(image_id).stem}_{indice:04d}"
 #indice:04d: escribe el índice de la célula con cuatro dígitos, agregando ceros a la izquierda si es necesario.
+
+
+#Función cargar_celula: lee el recorte RGB y la máscara de una célula que guardó el Bloque A (filtrar_y_extraer en etiquetado.py).
+#La usa main.py para pasarle cada célula a glcm_celula(). Los Bloques B y C la pueden usar para calcular textura y color de cada célula.
+
+def cargar_celula(rutas, cell_id): #rutas: diccionario que devuelve rutas_segmentacion(metodo). cell_id: identificador de la célula.
+
+    # Construir las rutas del recorte y de la máscara (se guardan con el mismo nombre en carpetas distintas)
+    ruta_crop = rutas["crops"] / f"{cell_id}.png"
+    ruta_mask = rutas["masks"] / f"{cell_id}.png"
+
+    # Leer el recorte a color y la máscara en escala de grises: la máscara queda (alto, ancho) con 255 en la célula y 0 en el fondo
+    crop = cv2.imread(str(ruta_crop), cv2.IMREAD_COLOR)
+    mask = cv2.imread(str(ruta_mask), cv2.IMREAD_GRAYSCALE)
+
+    # Verificar que se hayan cargado correctamente (imread devuelve None si no encuentra el archivo)
+    if crop is None or mask is None:
+        raise FileNotFoundError(f"No se encontró el recorte o la máscara de la célula: {cell_id}")
+
+    # OpenCV lee en BGR, así que pasamos el recorte a RGB como el resto del proyecto
+    crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+
+    return crop, mask

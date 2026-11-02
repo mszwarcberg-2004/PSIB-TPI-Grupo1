@@ -6,23 +6,29 @@
 
 El objetivo del trabajo es desarrollar un algoritmo de procesamiento de imágenes microscópicas de frotis sanguíneos que permita identificar eritrocitos individuales y clasificarlos como parasitados o no parasitados.
 
-Para ello, se implementarán técnicas de preprocesamiento, segmentación mediante Otsu, K-means y GMM, separación de células mediante Watershed y extracción de características de color y textura (GLCM).
+Para ello, se implementan técnicas de preprocesamiento, segmentación mediante Otsu, K-means y GMM, separación de células mediante Watershed y extracción de características de color y textura (GLCM).
 
-Finalmente, se evaluarán los resultados comparándolos con las anotaciones Ground Truth del dataset.
+Finalmente, se evalúan los resultados comparándolos con las anotaciones Ground Truth (GT) del dataset.
+
+El trabajo está dividido en tres bloques:
+
+| Bloque | Carpeta | Contenido |
+|---|---|---|
+| A - Segmentación | `segmentation/` | Preprocesamiento, Otsu, K-means, GMM, limpieza morfológica, etiquetado, filtrado, extracción de células y Watershed. |
+| B - Textura y evaluación | `texture_eval/` | Características GLCM, selección de atributos, métricas de segmentación (IoU, Dice, matching) y clasificación. |
+| C - Color | `color_stain/` | Espacios de color, características cromáticas, detección de glóbulos blancos y máscara final de eritrocitos infectados. |
 
 ## 1. Dataset
 
 Se utiliza el dataset **NIH-NLM-ThinBloodSmearsPf**, específicamente el subconjunto **Polygon Set**.
 
-Las imágenes microscópicas están almacenadas en formato JPG y cuentan con archivos Ground Truth (`.txt`) que contienen:
+Las imágenes son JPG RGB de 5312 × 2988 píxeles. Cada imagen tiene un archivo GT (`.txt`) con:
 
 - Identificador de cada célula.
 - Clasificación: `Parasitized`, `Uninfected` o `White_Blood_Cell`.
 - Coordenadas de los polígonos que delimitan sus contornos.
 
-Para el desarrollo del TP se seleccionaron **16 imágenes de 8 pacientes**, con dos imágenes por paciente.
-
-La división del dataset se realizó por paciente para evitar fuga de información:
+Se seleccionaron **16 imágenes de 8 pacientes** (dos imágenes por paciente). La división se hizo **por paciente**, para que imágenes de un mismo paciente no aparezcan en train y test a la vez (fuga de información):
 
 | Conjunto | Pacientes | Imágenes |
 |----------|-----------|----------|
@@ -30,253 +36,149 @@ La división del dataset se realizó por paciente para evitar fuga de informaci�
 | Test | 2 | 4 |
 | Total | 8 | 16 |
 
-Las imágenes seleccionadas contienen:
+Las imágenes seleccionadas contienen **240 eritrocitos parasitados**, **3.111 no parasitados** y 13 glóbulos blancos, según el GT.
 
-- 240 eritrocitos parasitados.
-- 3.111 eritrocitos no parasitados.
-
-Estas cantidades se obtuvieron a partir de las anotaciones GT.
+La división está en `data/shared/subset.csv`. **Test no se usa para ajustar nada**: solo se va a evaluar una vez, al final, con todos los parámetros fijos.
 
 ## 2. Estructura del repositorio
 
 ```text
 PSIB-TPI-Grupo1/
 │
-├── common/
-│   ├── __init__.py
-│   ├── config.py
-│   ├── io_utils.py
-│   └── verificar_dataset.py
-│
-├── data/
-│   ├── raw/
-│   ├── selected/
-│   │   └── carpetas de pacientes/
-│   │       ├── Img/
-│   │       └── GT/
-│   │
-│   └── shared/
-│       ├── subset.csv
-│       ├── gt/
-│       ├── pred/
-│       └── features/
-│
-├── segmentation/
-│   ├── __init__.py
-│   ├── notebooks/
-│   └── results/
-│
-├── texture_eval/
-│   ├── __init__.py
-│   ├── notebooks/
-│   └── results/
-│
-├── color_stain/
-│   ├── __init__.py
-│   ├── notebooks/
-│   └── results/
-│
-├── report/
-├── main.py
+├── main.py                      # Pipeline completo: integra los tres bloques
 ├── requirements.txt
-├── .gitignore
-└── README.md
+├── README.md
+├── report.md                    # Decisiones tomadas y resultados (base para el informe)
+│
+├── common/                      # Funciones compartidas por los tres bloques
+│   ├── config.py                # Rutas y parámetros generales (SEED, nombres de clases, rutas_segmentacion)
+│   ├── io_utils.py              # Carga de imágenes, GT, subset y células (cargar_celula)
+│   ├── generar_gt_utils.py      # GT --> recortes por célula y mapas de etiquetas (mapa_gt)
+│   ├── visualizar_gt.py         # Dibuja los polígonos del GT sobre las imágenes (data/shared/gt_check/)
+│   └── verificar_dataset.py     # Verifica archivos, conteos y división por paciente
+│
+├── segmentation/                # Bloque A
+│   ├── preprocess.py            # Máscara circular, CLAHE, filtro gaussiano, corrección de iluminación
+│   ├── cluster_segmentation.py  # Otsu, K-means, GMM y limpieza morfológica
+│   ├── etiquetado.py            # Etiquetado, filtrado por área/borde y extracción de recortes y máscaras
+│   ├── watershed_split.py       # Separación de células pegadas mediante Watershed
+│   ├── a1_segmentacion_base.py  # Segmentación de punta a punta + evaluación sobre train
+│   ├── comparar_otsu.py         # Comparación de configuraciones de Otsu
+│   ├── notebooks/
+│   └── results/                 # comparacion_otsu.csv
+│
+├── texture_eval/                # Bloque B
+│   ├── glcm_features.py         # Características GLCM de una célula (glcm_celula)
+│   ├── seg_metrics.py           # IoU y Dice globales, matching célula a célula (evaluar_imagen)
+│   ├── notebooks/               # glcm_gt_provisorio.ipynb: análisis de textura sobre el GT
+│   └── results/                 # Ranking de atributos, atributos seleccionados, umbrales
+│
+├── color_stain/                 # Bloque C (todavía sin código)
+│   ├── notebooks/
+│   └── results/
+│
+└── data/
+    ├── raw/                     # Imágenes originales: <paciente>/Img/*.jpg y <paciente>/GT/*.txt
+    └── shared/
+        ├── subset.csv           # Imágenes seleccionadas y split train/test
+        ├── gt_check/            # Imágenes con los polígonos del GT dibujados
+        ├── pred/<método>/       # Resultados de la segmentación (NO se sube a GitHub)
+        │   ├── crops/           # Recorte RGB de cada célula (fondo negro)
+        │   ├── masks/           # Máscara individual de cada célula
+        │   └── cells_pred.csv   # Una fila por célula detectada
+        └── features/            # CSV de características (los genera main.py)
 ```
 
-### Carpetas principales
+Las imágenes originales de `data/raw/` **nunca se modifican**: todo el procesamiento trabaja sobre copias.
 
-**`common/`**
+> Nota: los pacientes 208 y 209 tienen la carpeta del GT escrita `Gt` (no `GT`). `obtener_rutas()` contempla los dos nombres, así que funciona también en Linux o Colab.
 
-Contiene las funciones y configuraciones compartidas por los tres bloques. Permite utilizar las mismas imágenes y anotaciones sin duplicar código.
+## 3. Configuración del entorno
 
-**`data/`**
-
-Contiene las imágenes seleccionadas y los archivos compartidos.
-
-- `raw/`: reservado para datos originales que no se suben al repositorio.
-- `selected/`: imágenes seleccionadas, organizadas por paciente. Cada paciente tiene una carpeta `Img/` con las imágenes JPG y una carpeta `GT/` con sus anotaciones.
-- `shared/subset.csv`: imágenes seleccionadas y división en `train` y `test`.
-- `shared/gt/`: recortes y máscaras generados a partir del Ground Truth.
-- `shared/pred/`: recortes y máscaras generados mediante la segmentación propia.
-- `shared/features/`: archivos CSV con características de color y textura.
-
-**`segmentation/` - Bloque A**
-
-Preprocesamiento, segmentación de eritrocitos, separación de células y generación de recortes y máscaras.
-
-**`texture_eval/` - Bloque B**
-
-Extracción de características GLCM, evaluación de segmentación, clasificación y análisis de resultados.
-
-**`color_stain/` - Bloque C**
-
-Análisis de tinción y espacios de color, detección de bordes, extracción de características cromáticas y experimentos de compresión.
-
-**`main.py`**
-
-Integración final del pipeline desarrollado por los tres bloques.
-
-## 3. Funciones compartidas (`common/`)
-
-### 3.1. `config.py`
-
-Centraliza las rutas del proyecto y los parámetros generales.
-
-Variables principales:
-
-- `ROOT`: ruta de la carpeta principal del repositorio.
-- `DATA_DIR`: carpeta de datos.
-- `SELECTED_DIR`: carpeta donde se encuentran las imágenes seleccionadas.
-- `SHARED_DIR`: carpeta de archivos compartidos.
-- `SUBSET_CSV`: ruta del CSV con la selección de imágenes.
-- `GT_DIR`: carpeta de recortes y máscaras obtenidos desde el GT.
-- `PRED_DIR`: carpeta de recortes y máscaras obtenidos mediante la segmentación propia.
-- `FEATURES_DIR`: carpeta de características extraídas.
-- `SEED = 42`: semilla para reproducibilidad.
-- `SCALE = 1.0`: procesamiento a resolución original.
-- `TEST_SIZE = 0.25`: proporción de pacientes destinada a prueba.
-
-La división actual está definida manualmente en `subset.csv`, por lo que `TEST_SIZE` no se utiliza para generar una nueva partición.
-
-Las rutas se construyen a partir de `ROOT`, permitiendo ejecutar el código en diferentes computadoras sin modificar las rutas absolutas.
-
-### 3.2. `io_utils.py`
-
-Contiene las funciones compartidas para cargar imágenes y anotaciones.
-
-#### `obtener_rutas(patient_id, image_id)`
-
-Recibe el identificador del paciente y el nombre de la imagen.
-
-Devuelve las rutas de:
-
-- La imagen original JPG.
-- Su archivo Ground Truth TXT.
-
-También verifica que ambos archivos existan.
-
-#### `cargar_imagen(patient_id, image_id)`
-
-Carga una imagen mediante OpenCV, la convierte de BGR a RGB y devuelve una matriz NumPy con los valores de sus píxeles.
-
-#### `cargar_gt(patient_id, image_id)`
-
-Lee el archivo Ground Truth de una imagen.
-
-Devuelve:
-
-1. Una lista de diccionarios con las anotaciones.
-2. Las dimensiones de la imagen indicadas en el GT.
-
-Cada anotación contiene:
-
-```python
-{
-    "cell_id": cell_id,
-    "label": label,
-    "polygon": puntos
-}
-```
-
-- `cell_id`: identificador de la célula dentro del GT.
-- `label`: clasificación de la célula.
-- `polygon`: matriz NumPy con las coordenadas `(x, y)` de los vértices del contorno.
-
-Los polígonos se utilizarán posteriormente para generar las máscaras individuales de las células.
-
-#### `cargar_subset(split=None)`
-
-Lee `data/shared/subset.csv` y devuelve una lista de diccionarios con la información de las imágenes seleccionadas.
-
-Cada diccionario contiene:
-
-```python
-{
-    "image_id": "nombre_imagen.jpg",
-    "patient_id": "identificador_paciente",
-    "split": "train"
-}
-```
-
-La función puede utilizarse de tres formas:
-
-```python
-cargar_subset()          # Todas las imágenes seleccionadas
-cargar_subset("train")   # Imágenes de entrenamiento
-cargar_subset("test")    # Imágenes de prueba
-```
-
-Esta función devuelve la información de los archivos, no las matrices de las imágenes.
-
-### 3.3. `verificar_dataset.py`
-
-Script utilizado para comprobar la correcta carga del dataset.
-
-Realiza las siguientes verificaciones:
-
-- Existencia de cada imagen y su archivo GT.
-- Lectura de las anotaciones.
-- Conteo de células parasitadas y no parasitadas.
-- Cantidad de imágenes y pacientes seleccionados.
-- Ausencia de pacientes compartidos entre entrenamiento y prueba.
-
-Resultados de la última ejecución:
-
-```text
-RESUMEN DEL DATASET
-Imágenes totales: 16
-Pacientes de entrenamiento: 6
-Pacientes de prueba: 2
-Células parasitadas: 240
-Células no parasitadas: 3111
-División por pacientes: correcta
-```
-
-## 4. Configuración del entorno
-
-Se utiliza un entorno virtual de Python para instalar las dependencias del proyecto.
-
-Desde la carpeta principal del repositorio:
+Se desarrolló con **Python 3.14**. Desde la carpeta principal del repositorio:
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate          # En Windows: .venv\Scripts\activate
 python -m pip install -r requirements.txt
 ```
 
-El entorno virtual `.venv/` no se sube a GitHub.
+El entorno virtual `.venv/` no se sube a GitHub; cada integrante lo crea localmente.
 
-Cada integrante debe crearlo localmente.
+## 4. Cómo ejecutar
 
-## 5. Estado actual del proyecto
+**Todos los scripts se ejecutan desde la carpeta principal del repositorio**, y los que están dentro de una carpeta se corren como módulo (`python -m carpeta.archivo`, sin `.py`). Si se ejecutan de otra forma aparece `ModuleNotFoundError: No module named 'common'`.
 
-### Paso 0 - Configuración inicial compartida
+| Comando | Qué hace | Qué genera |
+|---|---|---|
+| `python -m common.verificar_dataset` | Verifica que estén todas las imágenes y GT, cuenta células y comprueba que ningún paciente esté en train y test. | Solo imprime en la terminal. |
+| `python -m common.visualizar_gt` | Dibuja los polígonos del GT sobre cada imagen (reducida al 25%). | `data/shared/gt_check/*.png` |
+| `python -m segmentation.comparar_otsu` | Compara 12 configuraciones de Otsu sobre train con IoU y Dice. | `segmentation/results/comparacion_otsu.csv` |
+| `python -m segmentation.a1_segmentacion_base` | Segmenta las imágenes de train (incluye Watershed), extrae las células y evalúa: IoU/Dice global y detección célula a célula (TP, FP, FN, precisión, sensibilidad, F1). | `data/shared/pred/<método>/` |
+| `python main.py` | Pipeline completo sobre train: segmentación con Watershed (Bloque A) + textura GLCM de cada célula (Bloque B). | `data/shared/pred/<método>/` y `data/shared/features/features_texture_<método>.csv` |
 
-Implementado:
+- El método de segmentación se elige con `METODO` en `main.py` y con el segundo argumento de `segmentacion_base(...)` al final de `a1_segmentacion_base.py` (`"otsu"`, `"kmeans"` o `"gmm"`).
+- Watershed se activa o desactiva con `APLICAR_WATERSHED` al principio de `a1_segmentacion_base.py` (por defecto `True`). Con `False` se usa el etiquetado simple, útil para comparar.
+- `a1_segmentacion_base.py` y `main.py` **borran los resultados anteriores** de `data/shared/pred/<método>/` antes de volver a generarlos.
+- Tiempos aproximados sobre las 12 imágenes de train: `a1` con Otsu ~1 min, `main.py` ~1 min, `comparar_otsu` ~1,5 min. K-means y GMM tardan algo más.
+- El notebook `texture_eval/notebooks/glcm_gt_provisorio.ipynb` se abre desde su propia carpeta (calcula la raíz del repo a partir de ahí).
 
-- Estructura inicial del repositorio.
-- Selección de imágenes y pacientes.
-- División en entrenamiento y prueba mediante `subset.csv`.
-- Configuración de rutas y parámetros generales.
-- Funciones para cargar imágenes y anotaciones GT.
-- Lectura del CSV de imágenes seleccionadas.
-- Verificación de archivos y conteo de células.
-- Comprobación de que no existen pacientes compartidos entre train y test.
+## 5. Flujo del pipeline y formatos compartidos
 
-Pendiente:
+```text
+subset.csv --> cargar_imagen (RGB original)
+                  |
+   [A] preprocesar_imagen --> campo circular + copia con CLAHE (canal verde) y gaussiano
+       segmentar (otsu | kmeans | gmm) --> máscara binaria
+       (& ~mascara_wbc, cuando el Bloque C la entregue)
+       limpiar_mascara (apertura, cierre, relleno de huecos chicos)
+       separar_celulas (Watershed: separa células pegadas y etiqueta cada una)
+       filtrar_y_extraer (área y borde) --> crops/, masks/, cells_pred.csv
+                  |
+   [B] cargar_celula --> glcm_celula --> features_texture_<método>.csv
+       seg_metrics: evaluar_segmentacion (global) y evaluar_imagen (célula a célula, contra el GT)
+                  |
+   [C] (pendiente) detección de glóbulos blancos, características de color, máscara final de infectados
+```
 
-- Verificación visual de los polígonos GT sobre algunas imágenes.
-- Definición final de identificadores únicos y formatos de recortes y máscaras.
-- Unificación de imports para la integración del proyecto.
+Formatos que comparten los tres bloques:
 
+- **`cell_id`**: `{paciente}_{imagen sin extensión}_{n con 4 dígitos}`, por ejemplo `208C67P28N_ThinF_IMG_20150819_115417_0007`. Lo genera `construir_cell_id()` y se usa para nombrar recortes, máscaras y filas de los CSV. Sirve para unir las características de textura y de color de una misma célula.
+- **Recorte (`crops/{cell_id}.png`)**: recorte RGB de la imagen **original** (sin CLAHE) dentro del bounding box, con el fondo en negro.
+- **Máscara (`masks/{cell_id}.png`)**: misma forma que el recorte, 255 = célula, 0 = fondo.
+- **`cells_pred.csv`**: `cell_id, image_id, patient_id, split, bbox_x, bbox_y, bbox_w, bbox_h, area, circularidad`.
+- **`mascara_wbc`** (la entrega el Bloque C): matriz booleana del tamaño de la imagen, con `True` donde hay un glóbulo blanco. Se pasa a `procesar_imagen()` y esos píxeles se sacan de la segmentación.
 
 ## 6. Organización del trabajo
 
-Cada integrante desarrollará sus funciones principalmente dentro de la carpeta correspondiente a su bloque.
+Cada integrante desarrolla sus funciones principalmente dentro de la carpeta de su bloque.
 
-Los archivos de `common/` y los formatos de `data/shared/` son compartidos. Cualquier modificación que afecte a los otros bloques deberá comunicarse al grupo.
+Los archivos de `common/` y los formatos de `data/shared/` son compartidos: cualquier cambio que afecte a otros bloques se comunica al grupo.
 
-Se trabajará con ramas individuales y los cambios se integrarán a `main` mediante Git.
+Se trabaja con ramas individuales (`feat/...`) y los cambios se integran a `main` mediante Git. Antes de empezar a trabajar, traer lo último de `main` (`git pull origin main`).
 
-Los resultados generados durante el procesamiento se mantendrán separados de las imágenes originales.
+Las decisiones y resultados de cada etapa se registran en `report.md`.
 
+---
+
+## Pendientes
+
+**Bloque A**
+- Confirmar Otsu como método final (es el mejor sobre train, también con Watershed) o decidir otro, y dejarlo fijo en `METODO` de `main.py`.
+- Revisar el filtro de área después de Watershed (se calibró antes de incorporarlo) o reemplazarlo por un filtro automático por imagen.
+- Inspección visual de la segmentación (contornos de TP, FP y FN sobre algunas imágenes de train) para el informe.
+- Unificar el recorrido de imágenes de `main.py` y `a1_segmentacion_base.py`.
+
+**Bloque B**
+- Recalcular las características GLCM sobre las células segmentadas (no solo sobre los polígonos del GT) y volver a elegir los umbrales.
+- Implementar la clasificación de células infectadas e integrarla en `main.py`.
+
+**Bloque C**
+- Detección de glóbulos blancos (`mascara_wbc`).
+- Características cromáticas por célula.
+- Construcción de la máscara final de eritrocitos infectados.
+
+**General**
+- Evaluación final sobre test, una única vez, con todos los parámetros fijos.
+- Fijar las versiones exactas de las librerías en `requirements.txt`.
+- Borrar archivos viejos que quedaron en la carpeta local `data/shared/pred/` (`cells_pred.csv` suelto y `otsu/metricas_otsu_train.csv`).
