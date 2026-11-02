@@ -3,8 +3,10 @@
 
 #Imports
 from collections import Counter #permite contar cuantas veces aparece cada valor
-from io_utils import cargar_subset, obtener_rutas, cargar_gt
-from config import SUBSET_CSV
+from common.io_utils import cargar_subset, obtener_rutas, cargar_gt
+from common.config import SUBSET_CSV
+#Agregamos "common." a los imports: como io_utils.py importa desde common.config, este archivo se tiene que correr
+#desde la carpeta principal del repo como módulo: python -m common.verificar_dataset (así lo corre también VS Code)
 
 # Cargar la lista de imágenes seleccionadas
 imagenes = cargar_subset()

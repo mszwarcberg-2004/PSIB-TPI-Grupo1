@@ -6,8 +6,12 @@ import numpy as np
 from skimage.measure import label, regionprops
 from common.io_utils import construir_cell_id
 
-AREA_MIN = 800          # menor que esto: mancha o ruido (AJUSTAR mirando las áreas reales)
-AREA_MAX = 12000        # mayor que esto: células pegadas o glóbulo blanco (AJUSTAR)
+AREA_MIN = 6000         # menor que esto: mancha o ruido (AJUSTAR mirando las áreas reales)
+AREA_MAX = 22000        # mayor que esto: células pegadas o glóbulo blanco (AJUSTAR)
+#Antes eran 800 y 12000, pero en el GT de train un eritrocito mide en promedio ~14000 píxeles (el 81% supera 12000), así que se descartaban la mayoría.
+#Los nuevos valores salen de mirar las áreas del GT de train (percentil 1 ≈ 8200 y percentil 99 ≈ 19500), dejando algo de margen porque
+#nuestras máscaras salen un poco más chicas que los polígonos del GT. Probándolo con Otsu sobre train: F1 de detección 0.36 --> 0.64, precisión 0.95.
+#Lo que sigue quedando afuera por grande son sobre todo células pegadas, que se van a separar con Watershed.
 DESCARTAR_BORDE = True  # descarta células cortadas por el borde del círculo
 MARGEN_BORDE = 3        # ancho (en píxeles) de la franja que se considera borde
 
