@@ -79,29 +79,18 @@ def limpiar_mascara(mascara): #Objetivo: mejorar la máscara binaria obtenida me
 
 
 # MÉTODOS: K-MEANS Y GMM (clustering por color)
-#Pasamos a Lab porque separa el brillo de la información cromática y 
+#Pasamos a Lab porque separa el brillo (L) de la información cromática (a y b), y así el fondo claro se distingue fácil por L.
 
+#Usamos SOLO el espacio Lab. Antes la función también aceptaba RGB y HSV, pero los sacamos porque:
+# - En el análisis de color del Bloque C (notebook C1), Lab fue el espacio que mejor agrupó los píxeles sin etiquetas
+#   (ARI: Lab 0.38 con K-means y 0.41 con GMM; RGB 0.32 y 0.41; HSV 0.38 y 0.39).
+# - En HSV el tono H es circular (el rosa está a la vez cerca de 0 y de 179), así que agrupar con H sin corregir da grupos mal armados.
 
-# MÉTODOS: K-MEANS Y GMM (clustering por color)
+def _agrupar_por_color(imagen_rgb, campo, modelo):
+    # Ajusta el modelo sobre una muestra de píxeles en el espacio Lab. Devuelve la máscara binaria de eritrocitos y los centros de los clusters.
 
-ESPACIO_COLOR = "LAB"  # Valor provisional; el Bloque C evaluará qué espacio conviene utilizar.
-
-def _agrupar_por_color(imagen_rgb, campo, modelo, espacio_color=ESPACIO_COLOR):
-    # Ajusta el modelo sobre una muestra de píxeles en el espacio de color elegido. Devuelve la máscara binaria de eritrocitos y los centros de los clusters.
-
-
-    espacio_color = espacio_color.upper() #convierte la variable del espacio de color a mayúsculas
-
-    # Convertir la imagen al espacio de color seleccionado
-
-    if espacio_color == "LAB":
-        imagen_color = cv2.cvtColor(imagen_rgb, cv2.COLOR_RGB2LAB)
-    elif espacio_color == "HSV":
-        imagen_color = cv2.cvtColor(imagen_rgb, cv2.COLOR_RGB2HSV)
-    elif espacio_color == "RGB":
-        imagen_color = imagen_rgb.copy()
-    else:
-        raise ValueError(f"Espacio de color desconocido: {espacio_color}")
+    # Convertir la imagen al espacio Lab
+    imagen_color = cv2.cvtColor(imagen_rgb, cv2.COLOR_RGB2LAB)
 
     # Convertir a float32 para aplicar clustering
     imagen_color = imagen_color.astype(np.float32)
@@ -133,23 +122,8 @@ def _agrupar_por_color(imagen_rgb, campo, modelo, espacio_color=ESPACIO_COLOR):
         else modelo.means_
     )
 
-    # Identificar el fondo según el espacio de color
-    if espacio_color == "LAB":
-        # En Lab, el canal L representa claridad.
-        fondo = np.argmax(centros[:, 0]) #Suponemos que el cluster más claro es el fondo.
-
-    elif espacio_color == "HSV":
-        # En HSV, el canal V representa brillo.
-        fondo = np.argmax(centros[:, 2]) #Suponemos que el cluster con más brillo es el fondo. 
-
-    else:
-        # En RGB, estimar la luminancia a partir de los tres canales.
-        brillo = (
-            0.299 * centros[:, 0]
-            + 0.587 * centros[:, 1]
-            + 0.114 * centros[:, 2]
-        )
-        fondo = np.argmax(brillo) #el máximo es el fondo. 
+    # Identificar el fondo: en Lab, el canal L representa claridad.
+    fondo = np.argmax(centros[:, 0]) #Suponemos que el cluster más claro es el fondo.
 
     # Construir máscara binaria: fondo = 0, resto de clusters = 1
     mascara = np.zeros(campo.shape, dtype=bool)
@@ -158,14 +132,14 @@ def _agrupar_por_color(imagen_rgb, campo, modelo, espacio_color=ESPACIO_COLOR):
     return mascara, centros
 
 
-def segmentar_kmeans(imagen_rgb, campo, k=K, espacio_color=ESPACIO_COLOR):
+def segmentar_kmeans(imagen_rgb, campo, k=K):
     # K-means agrupa los píxeles según su color.
     modelo = KMeans(n_clusters=k, n_init=5, random_state=SEED)
 
-    return _agrupar_por_color(imagen_rgb, campo, modelo, espacio_color)
+    return _agrupar_por_color(imagen_rgb, campo, modelo)
 
 
-def segmentar_gmm(imagen_rgb, campo, k=K, espacio_color=ESPACIO_COLOR):
+def segmentar_gmm(imagen_rgb, campo, k=K):
     # GMM modela los grupos de píxeles mediante distribuciones gaussianas.
     modelo = GaussianMixture(
         n_components=k,
@@ -173,18 +147,18 @@ def segmentar_gmm(imagen_rgb, campo, k=K, espacio_color=ESPACIO_COLOR):
         random_state=SEED
     )
 
-    return _agrupar_por_color(imagen_rgb, campo, modelo, espacio_color)
+    return _agrupar_por_color(imagen_rgb, campo, modelo)
 
 
-def segmentar(metodo, imagen_rgb, campo, espacio_color=ESPACIO_COLOR):
+def segmentar(metodo, imagen_rgb, campo):
     # Llama al método de segmentación elegido.
     if metodo == "otsu":
         return segmentar_otsu_verde(imagen_rgb, campo)
 
     if metodo == "kmeans":
-        return segmentar_kmeans(imagen_rgb, campo, espacio_color=espacio_color)
+        return segmentar_kmeans(imagen_rgb, campo)
 
     if metodo == "gmm":
-        return segmentar_gmm(imagen_rgb, campo, espacio_color=espacio_color)
+        return segmentar_gmm(imagen_rgb, campo)
 
     raise ValueError(f"Método desconocido: {metodo}")

@@ -54,6 +54,10 @@ Se eligió **Otsu como primer método de segmentación**, para establecer una re
 
 **Justificación:** se buscó aprovechar el contraste de intensidad entre los eritrocitos teñidos y el fondo claro. La elección también se consideró a partir de bibliografía sobre segmentación de células sanguíneas teñidas con Giemsa.
 
+**Respaldo del análisis de color (Bloque C, notebook C1):** se comparó qué tan bien cada canal de RGB, HSV y Lab separa los píxeles de fondo de los de células (AUC, solo train). El mejor fue **G** (AUC 0,969), prácticamente igual a L de Lab (0,967). Esto confirma la elección del canal verde.
+
+**Normalización de color (Bloque C, notebook C2):** se evaluó normalizar el color de cada imagen (balance de blancos y Reinhard). Para separar células del fondo no mejoró, porque Otsu ya calcula el umbral en cada imagen. Por eso no se incorporó a la segmentación.
+
 Otsu determina automáticamente un umbral que separa dos grupos de intensidades. En nuestro caso, los píxeles más oscuros que el umbral se consideran posibles regiones celulares.
 
 El umbral se calcula utilizando únicamente los píxeles del campo circular.
@@ -267,7 +271,7 @@ Se implementaron dos métodos de agrupamiento por color, como alternativa a Otsu
 **Decisiones y justificación:**
 - **Muestra de píxeles:** cada imagen tiene unos 7 millones de píxeles dentro del campo. Ajustar el modelo con una muestra da resultados equivalentes y reduce mucho el tiempo de cálculo.
 - **Ajuste por imagen:** el modelo se ajusta en cada imagen, sin usar etiquetas. No hay entrenamiento con el GT ni uso de test.
-- **Espacio Lab:** valor provisional; el Bloque C evaluará qué espacio de color conviene.
+- **Espacio Lab:** en el análisis de color del Bloque C (notebook C1) se agruparon píxeles de train sin etiquetas en RGB, HSV y Lab, y se midió cuánto coincidían los grupos con las clases reales (ARI). Lab fue el mejor (K-means 0,38; GMM 0,41), y en HSV el tono es circular (el rosa está cerca de 0 y de 179 a la vez), lo que complica agruparlo. Por eso la segmentación por agrupamiento usa **solo Lab**.
 - **GMM con covarianza completa:** permite grupos de forma elíptica, a diferencia de K-means, que supone grupos esféricos.
 - **Se mantiene CLAHE en el preprocesamiento:** se probó aplicar K-means y GMM sin CLAHE, porque CLAHE modifica solo el canal verde y altera el color. Sin embargo, sin CLAHE los resultados empeoraron en train (IoU de K-means 0,801 → 0,765; GMM 0,785 → 0,683), por lo que se mantuvo.
 
@@ -361,6 +365,21 @@ Detección célula a célula sobre train, con Watershed incorporado:
 - Grupos de células muy superpuestas pueden seguir sin separarse, porque no se forma una "cintura" clara entre ellas.
 
 **Implementación:** `segmentation/watershed_split.py` (`separar_celulas` y `estimar_radio`). Se activa con `APLICAR_WATERSHED = True` en `a1_segmentacion_base.py`, y con `False` se puede volver al etiquetado simple para comparar.
+
+### 8.6. Uso del gradiente (Sobel) en Watershed
+
+En el Bloque C (notebook C2) se compararon filtros pasa altos para resaltar el contorno de los eritrocitos: **Sobel y Prewitt con suavizado gaussiano previo** fueron los mejores (AUC borde vs fondo 0,95, contra 0,88 sin suavizar), y el Laplaciano el peor. Se propuso usar el gradiente como relieve de Watershed, para que el límite entre dos células caiga sobre su borde.
+
+Se probó sobre train con Otsu, manteniendo los mismos marcadores (centros) y cambiando solo el relieve que se inunda:
+
+| Relieve | Precisión | Sensibilidad | F1 |
+|---|---:|---:|---:|
+| **Distancia al fondo (elegido)** | 0.938 | 0.828 | **0.880** |
+| Sobel de G suavizado | 0.931 | 0.680 | 0.786 |
+| Distancia + 0,5 × Sobel | 0.938 | 0.825 | 0.878 |
+| Distancia + 1 × Sobel | 0.941 | 0.821 | 0.877 |
+
+**Decisión:** mantener la distancia al fondo. Sobel y Prewitt con gaussiano son los mejores detectores de bordes (C2), pero usar el gradiente en Watershed no mejoró la detección, porque los bordes entre células en contacto son débiles y los parásitos generan bordes internos (la respuesta del filtro dentro de las células parasitadas es 5 a 7 veces mayor que en las sanas).
 
 ## 9. Características de textura (GLCM) - Bloque B
 
