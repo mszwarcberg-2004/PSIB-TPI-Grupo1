@@ -26,8 +26,7 @@ from segmentation.cluster_segmentation import (
     rellenar_huecos_chicos
 )
 
-from evaluacion.evaluacion import evaluar_segmentacion
-
+from texture_eval.seg_metrics import evaluar_segmentacion
 
 def comparar_otsu():
 
