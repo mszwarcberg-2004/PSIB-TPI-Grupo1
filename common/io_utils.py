@@ -9,6 +9,7 @@ from common.config import SELECTED_DIR, SUBSET_CSV
 import cv2
 import csv
 import numpy as np
+from pathlib import Path
 
 #Función para obtener las rutas y encontrar las imagenes y el gt de los distintos pacientes. 
 def obtener_rutas(patient_id, image_id):
