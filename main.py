@@ -17,7 +17,6 @@ from texture_eval.glcm_features import glcm_celula
 
 # Cuando cada bloque tenga sus funciones, se importan acá, por ejemplo:
 # from color_stain.wbc_detection import detectar_wbc                 # Bloque C
-# from segmentation.watershed_split import separar_celulas           # Bloque A
 # from color_stain.color_features import calcular_color              # Bloque C
 # from texture_eval.auto_classifier import identificar_infectados    # Bloque B
 # from color_stain.infected_seg import construir_mascara_infectados  # Bloque C
@@ -58,7 +57,7 @@ def procesar_imagen(imagen_rgb, patient_id, image_id, split, rutas):
         caracteristicas_textura.append({"cell_id": fila["cell_id"], **atributos})
 
     # 3. PASOS PENDIENTES
-    # Separación de células adheridas mediante Watershed
+    # (La separación de células pegadas con Watershed ya está incluida en el paso 1, dentro de segmentar_imagen)
     # Extracción de características cromáticas
     # Clasificación de eritrocitos infectados
     # Construcción de la máscara final de células infectadas

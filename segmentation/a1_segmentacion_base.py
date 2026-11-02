@@ -10,9 +10,11 @@ from common.generar_gt_utils import mapa_gt
 from segmentation.preprocess import preprocesar_imagen
 from segmentation.cluster_segmentation import segmentar, limpiar_mascara
 from segmentation.etiquetado import etiquetar, filtrar_y_extraer, MARGEN_BORDE
+from segmentation.watershed_split import separar_celulas
 from texture_eval.seg_metrics import evaluar_segmentacion, evaluar_imagen
 
 CLASES_ERITROCITOS = ["Parasitized", "Uninfected"]  # el GT de glóbulos blancos no se incluye
+APLICAR_WATERSHED = True  # True: separa células pegadas con Watershed. False: etiquetado simple (como antes), sirve para comparar
 
 
 def procesar_imagen(imagen_rgb, patient_id, image_id, split, rutas, metodo="otsu", mascara_wbc=None): #procesa una imagen
@@ -37,7 +39,11 @@ def procesar_imagen(imagen_rgb, patient_id, image_id, split, rutas, metodo="otsu
     mascara_limpia = limpiar_mascara(mascara_inicial)
 
     # 5. Etiquetar los objetos de la máscara limpia
-    etiquetas = etiquetar(mascara_limpia)
+    # Con Watershed, además de etiquetar, se separan las células que estaban pegadas (ver watershed_split.py)
+    if APLICAR_WATERSHED:
+        etiquetas, _ = separar_celulas(mascara_limpia)
+    else:
+        etiquetas = etiquetar(mascara_limpia)
 
     # 6. Filtrar y extraer las células individuales
     # Usamos la imagen RGB ORIGINAL para conservar sus colores reales
