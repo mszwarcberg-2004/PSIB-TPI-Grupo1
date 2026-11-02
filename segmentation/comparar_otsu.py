@@ -53,7 +53,10 @@ def comparar_otsu():
         mascara_sin_filtro = (verde < umbral_sin) & campo
 
         # 4. Otsu con filtro gaussiano
-        mascara_otsu, _ = segmentar_otsu_verde(imagen_rgb, campo)
+        # El gaussiano ya no está dentro de segmentar_otsu_verde (se pasó a preprocesar_imagen en preprocess.py),
+        # así que lo aplicamos acá. Si no, esta fila y las 3 a 6 serían Otsu SIN gaussiano aunque el nombre diga lo contrario.
+        imagen_suavizada = cv2.GaussianBlur(imagen_rgb, (5, 5), 0)
+        mascara_otsu, _ = segmentar_otsu_verde(imagen_suavizada, campo)
 
         # 5. Apertura morfológica
         kernel_apertura = cv2.getStructuringElement(
