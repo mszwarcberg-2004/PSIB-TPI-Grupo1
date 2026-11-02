@@ -135,16 +135,18 @@ Se aplica etiquetado de componentes conectadas con **conectividad 8**, asignando
 Se utilizan propiedades geométricas de cada región etiquetada.
 
 **Criterios actuales:**
-- Área mínima: 800 píxeles.
-- Área máxima: 12.000 píxeles.
-- Exclusión de objetos que tocan la franja de seguridad próxima al borde circular.
+- Área mínima: 6.000 píxeles.
+- Área máxima: 22.000 píxeles.
+- Exclusión de objetos que tocan la franja de seguridad próxima al borde circular (3 píxeles).
+
+Inicialmente se usaron 800 y 12.000 píxeles. Estos valores se corrigieron después de medir las áreas reales del GT (ver sección 5.5).
 
 **Justificación:**
 - Eliminar pequeñas manchas de ruido.
 - Descartar regiones demasiado grandes que podrían corresponder a células agrupadas u otros objetos.
 - Evitar recortes de eritrocitos incompletos en los bordes.
 
-Estos umbrales son provisionales y no garantizan que todos los objetos aceptados sean eritrocitos correctamente segmentados.
+Estos umbrales no garantizan que todos los objetos aceptados sean eritrocitos correctamente segmentados.
 
 ### 5.3. Extracción de recortes y máscaras
 
@@ -185,9 +187,169 @@ La inspección visual mostró resultados mixtos:
 
 El número de objetos aceptados no constituye por sí mismo una métrica de calidad. La evaluación debe complementarse con IoU, Dice e inspección visual.
 
+*Nota: estos 618 objetos corresponden al filtro de área original (800 a 12.000 píxeles). Con el filtro corregido se aceptan 1.175 (sección 5.5).*
+
 Aclaración sobre los resultados: el IoU de 0.8016 y el Dice de 0.8894 corresponden a la máscara de Otsu después de CLAHE y limpieza morfológica, pero antes del etiquetado y filtrado de objetos. Por otro lado, los 618 objetos corresponden a las regiones aceptadas después del filtrado por área y borde. Por lo tanto, las métricas evalúan la superposición de la máscara de segmentación con el GT, mientras que el número de objetos indica cuántas regiones fueron aceptadas para la extracción de células.
 
-## 6. Estrategia general del proyecto
+### 5.5. Corrección del filtro de área
+
+Al comparar el filtro con las áreas de los eritrocitos del GT de **train** se observó que el área máxima de 12.000 píxeles era demasiado baja:
+
+| Área de los eritrocitos del GT (train) | Píxeles |
+|---|---:|
+| Percentil 1 | 8.175 |
+| Percentil 5 | 9.872 |
+| Mediana | 13.929 |
+| Percentil 95 | 17.832 |
+| Percentil 99 | 19.536 |
+
+El 81% de los eritrocitos del GT superaba los 12.000 píxeles, por lo que el filtro descartaba la mayoría de las células individuales y no solo las células pegadas.
+
+**Decisión:** usar un área mínima de **6.000** y una máxima de **22.000** píxeles.
+
+**Justificación:**
+- Los límites se apoyan en los percentiles 1 y 99 del GT de train, con margen hacia abajo porque nuestras máscaras resultan algo más chicas que los polígonos del GT.
+- Se probaron varias combinaciones sobre train con la evaluación célula a célula (sección 5.6), y esta fue de las que mejor equilibró precisión y sensibilidad:
+
+| Área mín. - máx. | TP | FP | FN | Precisión | Sensibilidad | F1 |
+|---|---:|---:|---:|---:|---:|---:|
+| 800 - 12.000 (original) | 527 | 91 | 1.780 | 0.853 | 0.228 | 0.360 |
+| 800 - 20.000 | 1.110 | 103 | 1.197 | 0.915 | 0.481 | 0.631 |
+| 5.000 - 20.000 | 1.110 | 56 | 1.197 | 0.952 | 0.481 | 0.639 |
+| **6.000 - 22.000** | **1.119** | **56** | **1.188** | **0.952** | **0.485** | **0.643** |
+| 8.000 - 22.000 | 1.099 | 44 | 1.208 | 0.962 | 0.476 | 0.637 |
+| 6.000 - 25.000 | 1.138 | 78 | 1.169 | 0.936 | 0.493 | 0.646 |
+
+Se eligió 6.000 - 22.000 en lugar de 6.000 - 25.000 porque, con una mejora mínima de F1, el segundo acepta más falsos positivos (objetos grandes que suelen ser dos células pegadas).
+
+**Resultado:** con Otsu, la cantidad de células aceptadas en train pasó de 618 a **1.175**.
+
+**Limitación:** la mayoría de los eritrocitos que siguen sin detectarse corresponden a células en contacto, que forman un único objeto demasiado grande o con IoU bajo respecto de cada célula del GT. Esto se abordará con Watershed.
+
+### 5.6. Evaluación célula a célula (matching)
+
+IoU y Dice globales miden superposición de píxeles, pero no indican si cada eritrocito se detectó por separado. Por eso se agregó una evaluación individual.
+
+**Método:**
+1. Se construye un mapa de etiquetas del GT (cada eritrocito con un número distinto, sin glóbulos blancos).
+2. Se calcula el IoU entre cada célula del GT y cada célula predicha aceptada.
+3. Se emparejan las células uno a uno (algoritmo húngaro) y un par se considera **verdadero positivo (TP)** si su IoU es al menos **0,5**.
+4. Las células predichas sin pareja son **falsos positivos (FP)** y las del GT sin pareja son **falsos negativos (FN)**.
+5. Se calculan precisión, sensibilidad y F1 sumando TP, FP y FN de todas las imágenes (así cada célula pesa lo mismo, independientemente de la imagen).
+
+**Decisiones y justificación:**
+- **Umbral de IoU 0,5:** es el criterio habitual en detección de objetos. Además, con IoU mayor a 0,5 cada célula solo puede emparejarse con una única célula de la otra máscara.
+- **Exclusión de las células del GT cortadas por el borde:** nuestro filtrado descarta a propósito las células que tocan el borde del campo circular. Si se dejaran en el GT, se contarían como FN células que se decidió no analizar. Se usa la misma franja de 3 píxeles en ambos casos.
+- **Solo células aceptadas:** se evalúan las células que pasaron el filtrado, porque son las que se usan en las etapas siguientes.
+
+Resultado con Otsu sobre train:
+
+| TP | FP | FN | Precisión | Sensibilidad | F1 |
+|---:|---:|---:|---:|---:|---:|
+| 1.119 | 56 | 1.188 | 0.952 | 0.485 | 0.643 |
+
+**Interpretación:** casi todo lo que se acepta es un eritrocito bien segmentado (precisión alta), pero todavía se pierde aproximadamente la mitad de las células, principalmente por contacto entre células.
+
+## 6. Segmentación mediante K-means y GMM
+
+Se implementaron dos métodos de agrupamiento por color, como alternativa a Otsu.
+
+**Implementación:**
+1. Se usa la misma imagen preprocesada que para Otsu (CLAHE en el canal verde y filtro gaussiano) y el mismo campo circular.
+2. La imagen se convierte al espacio **Lab**, que separa la luminosidad (L) de la información de color (a y b).
+3. Se agrupan los píxeles en **K = 3** grupos: fondo, eritrocitos y zonas más oscuras (por ejemplo, parásitos o núcleos).
+4. El modelo se ajusta sobre una muestra aleatoria de **50.000 píxeles** del campo (con semilla fija, para que sea reproducible) y después se clasifican todos los píxeles por partes.
+5. El grupo con mayor luminosidad (L) se considera fondo; el resto forma la máscara de eritrocitos.
+6. Después se aplica la misma limpieza morfológica, etiquetado y filtrado que con Otsu.
+
+**Decisiones y justificación:**
+- **Muestra de píxeles:** cada imagen tiene unos 7 millones de píxeles dentro del campo. Ajustar el modelo con una muestra da resultados equivalentes y reduce mucho el tiempo de cálculo.
+- **Ajuste por imagen:** el modelo se ajusta en cada imagen, sin usar etiquetas. No hay entrenamiento con el GT ni uso de test.
+- **Espacio Lab:** valor provisional; el Bloque C evaluará qué espacio de color conviene.
+- **GMM con covarianza completa:** permite grupos de forma elíptica, a diferencia de K-means, que supone grupos esféricos.
+- **Se mantiene CLAHE en el preprocesamiento:** se probó aplicar K-means y GMM sin CLAHE, porque CLAHE modifica solo el canal verde y altera el color. Sin embargo, sin CLAHE los resultados empeoraron en train (IoU de K-means 0,801 → 0,765; GMM 0,785 → 0,683), por lo que se mantuvo.
+
+## 7. Comparación preliminar de los métodos de segmentación
+
+Resultados sobre las 12 imágenes de train, con el mismo preprocesamiento, limpieza y filtrado:
+
+| Método | IoU global | Dice global | Células aceptadas | TP | FP | FN | Precisión | Sensibilidad | F1 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **Otsu** | **0.8016** | **0.8894** | 1.175 | 1.119 | 56 | 1.188 | 0.952 | **0.485** | **0.643** |
+| K-means | 0.8009 | 0.8868 | 776 | 758 | 18 | 1.549 | 0.977 | 0.329 | 0.492 |
+| GMM | 0.7847 | 0.8779 | 638 | 621 | 17 | 1.686 | 0.973 | 0.269 | 0.422 |
+
+**Observaciones:**
+- A nivel de píxeles, Otsu y K-means son prácticamente equivalentes; GMM es algo peor.
+- A nivel de células individuales, Otsu detecta bastantes más células. K-means y GMM tienen mayor precisión pero aceptan menos objetos, probablemente porque generan más uniones entre células vecinas, que quedan fuera del filtro de área.
+- El filtro de área se calibró con Otsu; todavía no se ajustó para K-means y GMM.
+
+**Estado:** comparación preliminar. La elección final del método se hará después de incorporar Watershed, porque la separación de células pegadas puede cambiar el resultado de K-means y GMM.
+
+## 8. Características de textura (GLCM) - Bloque B
+
+Para cada eritrocito se calculan características de textura a partir de la matriz de co-ocurrencia de niveles de gris (GLCM).
+
+**Parámetros:**
+- **Canal verde:** es el que mejor contrasta el parásito con el citoplasma del eritrocito en las imágenes teñidas.
+- **32 niveles de gris** (en lugar de 256): simplifica la matriz y reduce el costo de cálculo. Se usa el mismo mapeo para todas las células.
+- **Distancias 1, 2 y 3 píxeles** y **ángulos 0°, 45°, 90° y 135°**: se promedian los cuatro ángulos para cada distancia, para que las características no dependan de la orientación de la célula.
+- **Solo píxeles de la célula:** los píxeles del fondo se asignan a un nivel reservado que después se descarta, para que solo cuenten los pares de píxeles que están ambos dentro de la célula.
+- **Características:** contraste, homogeneidad, energía, correlación y entropía (15 en total: 5 propiedades × 3 distancias).
+
+### 8.1. Selección de atributos
+
+El análisis se hizo sobre los recortes del GT de **train** (217 parasitadas y 2.135 no parasitadas).
+
+1. **Capacidad de separación:** para cada característica se calculó el área bajo la curva ROC (AUC) mediante el estadístico U de Mann-Whitney. Un AUC de 0,5 indica que no separa las clases y 1 (o 0) que las separa perfectamente.
+2. **Redundancia:** se calculó la correlación de Spearman entre características. Recorriendo el ranking de mejor a peor, se agregó cada característica solo si su correlación con las ya elegidas era menor a 0,9, y se descartaron las de separación menor a 0,6.
+
+| Característica | AUC | Sentido |
+|---|---:|---|
+| contrast_d3 | 0.991 | mayor en parasitadas |
+| contrast_d2 | 0.987 | mayor en parasitadas |
+| homogeneity_d2 | 0.056 | menor en parasitadas |
+| entropy_d2 | 0.919 | mayor en parasitadas |
+| correlation_d1 | 0.890 | mayor en parasitadas |
+| energy_d1 | 0.137 | menor en parasitadas |
+
+**Atributos seleccionados:** `contrast_d3`, `correlation_d1` y `energy_d1`.
+
+Como referencia, el tamaño de la célula (cantidad de píxeles) tiene AUC 0,518: no distingue parasitadas de no parasitadas, por lo que la separación se debe a la textura y no al tamaño.
+
+### 8.2. Umbrales de clasificación
+
+Para cada atributo seleccionado se eligió un umbral sobre la curva ROC de train, con dos criterios:
+- **Youden:** maximiza sensibilidad + especificidad - 1.
+- **F1:** maximiza el equilibrio entre precisión y sensibilidad, más adecuado con clases desbalanceadas (aproximadamente 1 parasitada cada 10 no parasitadas).
+
+| Regla | Sensibilidad | Especificidad | Precisión | F1 |
+|---|---:|---:|---:|---:|
+| contrast_d3 ≥ 0,596 (Youden) | 0.940 | 0.981 | 0.833 | 0.883 |
+| contrast_d3 ≥ 0,698 (F1) | 0.894 | 0.990 | 0.898 | 0.896 |
+| correlation_d1 ≥ 0,944 (Youden) | 0.903 | 0.797 | 0.311 | 0.463 |
+| energy_d1 ≤ 0,418 (Youden) | 0.788 | 0.821 | 0.309 | 0.444 |
+
+Para estimar si el umbral generaliza a pacientes nuevos se hizo una **validación dejando un paciente afuera**: el umbral se calcula con 5 pacientes y se evalúa en el sexto, rotando. Con `contrast_d3` se obtuvo sensibilidad 0,940, precisión 0,533 y F1 0,680: la precisión baja bastante respecto de train, lo que indica que el umbral depende del paciente (diferencias de tinción).
+
+**Limitaciones:**
+- Los atributos y umbrales se obtuvieron con los **polígonos del GT**. Nuestras máscaras segmentadas tienen contornos distintos, por lo que hay que recalcular las características sobre las células segmentadas antes de aplicar los umbrales.
+- Las parasitadas están concentradas en un paciente (209C68P29N tiene 145 de las 217 de train).
+- La selección de atributos se hizo con todo train antes de la validación por paciente, por lo que esa validación puede ser algo optimista.
+
+## 9. Integración de los bloques
+
+El archivo `main.py` integra el pipeline completo. Por ahora:
+1. Segmenta cada imagen con el método elegido (Bloque A) y guarda recortes y máscaras de cada célula.
+2. Calcula las características GLCM de cada célula detectada (Bloque B) y las guarda en `data/shared/features/features_texture_<método>.csv`.
+
+**Decisiones sobre los formatos compartidos:**
+- **Identificador único de célula (`cell_id`):** `{paciente}_{imagen}_{número de 4 dígitos}`. Permite unir las características de textura y de color de una misma célula.
+- **Recortes de la imagen original:** los recortes se extraen de la imagen RGB original, no de la preprocesada, para que los Bloques B y C trabajen con los colores e intensidades reales.
+- **Resultados separados por método:** cada método guarda en `data/shared/pred/<método>/`, para poder comparar sin sobrescribir.
+- **Máscara de glóbulos blancos:** el Bloque C entregará una máscara booleana del tamaño de la imagen con `True` en los glóbulos blancos; esos píxeles se eliminan de la segmentación antes de la limpieza morfológica.
+
+## 10. Estrategia general del proyecto
 
 Se definieron dos estrategias posibles para obtener finalmente **máscaras de eritrocitos parasitados completos**.
 
@@ -210,22 +372,24 @@ También se contempla incorporar detección y exclusión de glóbulos blancos me
 
 Estas etapas todavía no están implementadas en el pipeline actual.
 
-## 7. Evaluación y próximos pasos
+## 11. Evaluación y próximos pasos
 
-**Estado actual:** se completó una primera implementación de Otsu con CLAHE, limpieza morfológica, etiquetado, filtrado y extracción de recortes, utilizando train.
+**Estado actual:**
+- Otsu, K-means y GMM implementados, con limpieza morfológica, etiquetado, filtrado y extracción de células.
+- Evaluación global (IoU, Dice) y célula a célula (TP, FP, FN, precisión, sensibilidad, F1) sobre train.
+- Características de textura GLCM calculadas y analizadas sobre el GT de train.
+- Pipeline de `main.py` funcionando para segmentación y textura.
 
 **Próximos pasos:**
-1. Implementar la segmentación mediante **K-means**, utilizando características cromáticas en espacios como Lab o HSV.
-2. Implementar y evaluar **GMM** como método alternativo de agrupamiento.
-3. Comparar los métodos con las mismas métricas y el mismo conjunto de entrenamiento.
-4. Evaluar **Watershed** para separar eritrocitos en contacto.
-5. Incorporar la detección y exclusión de glóbulos blancos.
-6. Desarrollar la identificación de eritrocitos parasitados mediante características de color y textura.
-7. Evaluar los métodos definidos sobre el **conjunto de test**, manteniendo sus parámetros fijos.
+1. Evaluar **Watershed** para separar eritrocitos en contacto.
+2. Elegir el método de segmentación final con las métricas globales y célula a célula sobre train.
+3. Incorporar la detección y exclusión de glóbulos blancos (Bloque C).
+4. Recalcular la textura sobre las células segmentadas y desarrollar la identificación de eritrocitos parasitados con características de color y textura.
+5. Evaluar el algoritmo final sobre el **conjunto de test**, una sola vez, manteniendo los parámetros fijos.
 
 La evaluación final deberá distinguir entre la calidad de segmentación de píxeles, la detección de células individuales y la identificación de eritrocitos parasitados.
 
-## 8. Bibliografía de referencia
+## 12. Bibliografía de referencia
 
 Walliander, M., et al. (2013). *Automated segmentation of blood cells in Giemsa stained digitized thin blood films*. Diagnostic Pathology, 8(Suppl. 1), S37.
 
