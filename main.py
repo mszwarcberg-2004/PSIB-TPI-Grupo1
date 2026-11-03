@@ -27,9 +27,12 @@ from segmentation.a1_segmentacion_base import limpiar_resultados_anteriores
 from segmentation.a1_segmentacion_base import gt_sin_borde, CLASES_ERITROCITOS
 
 # Bloque C
+from color_stain.color_features import (mediana_fondo, calcular_fondo_ref, guardar_fondo_ref,
+                                        cargar_fondo_ref, color_celula)
 from color_stain.wbc_detection import detectar_wbc
 
 # Bloque B
+from texture_eval import clasificacion_pred as clf
 from texture_eval.glcm_features import glcm_celula
 from texture_eval.seg_metrics import evaluar_segmentacion, evaluar_imagen
 
@@ -64,7 +67,7 @@ def procesar_imagen(imagen_rgb, patient_id, image_id, split, rutas):
 
         caracteristicas_textura.append({"cell_id": fila["cell_id"], **atributos})  #con cell_id para unirla después con el color
 
-    caracteristicas_color = []  #pendiente (ver abajo de todo)
+    
     parasitemia = None          #pendiente (ver abajo de todo)
 
     return {
@@ -73,7 +76,7 @@ def procesar_imagen(imagen_rgb, patient_id, image_id, split, rutas):
         "campo": campo,              # campo circular del microscopio
         "celulas": filas,            # una fila por célula aceptada (va a cells_pred.csv)
         "textura": caracteristicas_textura,
-        "color": caracteristicas_color,
+        "fondo": mediana_fondo(imagen_rgb, campo),
         "parasitemia": parasitemia
     }
 
@@ -139,7 +142,8 @@ def main(split="train"):
     textura_total = []
     metricas_total = []
     etiquetas_total = []
-
+    fondos = {}
+    guardados = []
     for imagen in imagenes:
 
         imagen_rgb = cargar_imagen(
@@ -158,6 +162,14 @@ def main(split="train"):
         celulas_total.extend(resultado["celulas"])
         textura_total.extend(resultado["textura"])
 
+        fondos[imagen["image_id"]] = resultado["fondo"]
+        if split == "test":
+            anot, _ = cargar_gt(imagen["patient_id"], imagen["image_id"])
+            gt_par = gt_sin_borde(mapa_gt(imagen_rgb.shape, anot, clases=["Parasitized"]), resultado["campo"])
+            guardados.append({"patient_id": imagen["patient_id"], "image_id": imagen["image_id"],
+                            "celulas": resultado["celulas"], "campo": resultado["campo"],
+                            "etiquetas": resultado["etiquetas"].astype(np.int16), "gt": gt_par.astype(np.int16)})
+    
         metricas, etiquetas_celulas = evaluar_contra_gt(imagen_rgb, resultado, imagen["patient_id"], imagen["image_id"])
         metricas_total.append(metricas)
         etiquetas_total.extend(etiquetas_celulas)
@@ -182,7 +194,31 @@ def main(split="train"):
     tabla_etiquetas = pd.DataFrame(etiquetas_total)
     ruta_etiquetas = rutas["csv"].parent / f"etiquetas_{split}.csv"
     tabla_etiquetas.to_csv(ruta_etiquetas, index=False)
+    
+    # Paso 7: color (el fondo de referencia se fija con train y test lo reutiliza)
+    if split == "train":
+        fondo_ref = calcular_fondo_ref(fondos)
+        guardar_fondo_ref(fondo_ref)
+        print("Fondo de referencia (R, G, B):", fondo_ref.round(1), "| el de C4 era [220.3 181.1 166.4]")
+    else:
+        fondo_ref = cargar_fondo_ref()
 
+    color_total = []
+    for fila in celulas_total:
+        crop, mask = cargar_celula(rutas, fila["cell_id"])
+        color_total.append({"cell_id": fila["cell_id"],
+                            **color_celula(crop, mask, fondos[fila["image_id"]], fondo_ref)})
+    color = pd.DataFrame(color_total)
+    color.to_csv(FEATURES_DIR / f"features_color_{METODO}_{split}.csv", index=False)
+
+    # Pasos 8 y 9: color + textura
+    tabla = clf.unir_features(pd.DataFrame(textura_total), color)
+    sel_color, sel_tex = clf.cargar_seleccion()
+    if split == "train":
+        print(clf.entrenar(clf.con_etiquetas(tabla, tabla_etiquetas), sel_color, sel_tex, METODO).round(3))
+    else:
+        print(clf.evaluar_test(tabla, guardados, METODO).round(3))
+        
     # Resumen: IoU y Dice se promedian por imagen; TP, FP y FN se suman (cada célula pesa lo mismo)
     tp, fp, fn = tabla_metricas[["TP", "FP", "FN"]].sum()
     precision = tp / (tp + fp) if (tp + fp) else 0.0
