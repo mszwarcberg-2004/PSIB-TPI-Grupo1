@@ -107,10 +107,12 @@ La comparación de las principales configuraciones sobre train produjo:
 | Configuración | IoU promedio | Dice promedio |
 |---|---:|---:|
 | Otsu sin filtro | 0.7615 | 0.8636 |
-| Otsu + gaussiano + limpieza completa | 0.7779 | 0.8743 |
+| Otsu + gaussiano + limpieza completa | 0.8025 | 0.8901 |
 | CLAHE + gaussiano + Otsu, sin limpieza | 0.7862 | 0.8796 |
-| CLAHE + gaussiano + Otsu + solo relleno | 0.8006 | 0.8888 |
-| **CLAHE + gaussiano + Otsu + limpieza completa** | **0.8016** | **0.8894** |
+| CLAHE + gaussiano + Otsu + solo relleno | 0.8215 | 0.9019 |
+| **CLAHE + gaussiano + Otsu + limpieza completa** | **0.8224** | **0.9024** |
+
+*Valores con el relleno de huecos final (`HUECO_MAX` = 4.086, sección 10). La primera versión de esta comparación usó 1.500 (mejor configuración: IoU 0,8016, Dice 0,8894, que es el valor que aparece en las secciones 5, 7 y 9). Con 4.086 suben las configuraciones que rellenan huecos, pero el orden es el mismo.*
 
 **Configuración seleccionada:**
 
@@ -143,7 +145,7 @@ Se utilizan propiedades geométricas de cada región etiquetada.
 - Área máxima: 22.000 píxeles.
 - Exclusión de objetos que tocan la franja de seguridad próxima al borde circular (3 píxeles).
 
-Inicialmente se usaron 800 y 12.000 píxeles. Estos valores se corrigieron después de medir las áreas reales del GT (ver sección 5.5).
+Inicialmente se usaron 800 y 12.000 píxeles. Estos valores se corrigieron después de medir las áreas reales del GT (ver sección 5.5), y finalmente se reemplazaron por un filtro relativo al área típica de cada imagen (sección 10).
 
 **Justificación:**
 - Eliminar pequeñas manchas de ruido.
@@ -432,7 +434,37 @@ Con G < 80 o G < 100 y cualquier tamaño mínimo entre 3.000 y 12.000 píxeles, 
 
 **Limitación:** en train hay solo 10 glóbulos blancos, por lo que la validación es limitada.
 
-## 10. Características de textura (GLCM) - Bloque B
+## 10. Ajuste final del relleno de huecos y del filtro de área
+
+Con el pipeline completo (Otsu, limpieza, Watershed y exclusión de glóbulos blancos) se revisaron los dos parámetros que se habían elegido a mano, siguiendo las indicaciones del profesor: criterio explícito a partir de train, independencia de la escala y validación.
+
+**Relleno de huecos (criterio a partir del GT de train).** Se midieron los huecos que deja Otsu después de la apertura y el cierre, y se separaron los que caen **dentro de un eritrocito del GT** (centros claros, que hay que rellenar) de los que caen en el fondo. Los centros claros miden: mediana 773, percentil 95 = 2.800 y **percentil 99 = 4.086 píxeles**. Con el valor anterior (1.500) quedaba sin rellenar el 27 % de ellos.
+**Decisión:** `HUECO_MAX` = percentil 99 de los centros claros = **4.086 píxeles**.
+
+**Filtro de área (relativo a cada imagen, sin GT).** En lugar de límites fijos en píxeles, se calcula en cada imagen el **área típica de una célula**, como la mediana de las áreas ponderada por área (el objeto en el que se completa la mitad de los píxeles de célula). La mediana simple no sirve: en las imágenes con muchos fragmentos pequeños (paciente 209) daba unos 2.000 píxeles en lugar de unos 12.000. La ponderada da entre 10.000 y 14.600 píxeles en todas las imágenes de train.
+**Decisión:** aceptar los objetos entre **0,6 y 2,0 veces** el área típica de su imagen.
+
+**Selección y validación (solo train).** Se probaron `HUECO_MAX` = 1.500, 2.800 y 4.086 y factores mínimos de 0,3 a 0,8 y máximos de 1,4 a 2,2, con validación dejando un paciente afuera: en las 6 vueltas se eligió la misma combinación (4.086; 0,6 – 2,0).
+
+| Factor máx. → / mín. ↓ | 1,8 | 2,0 | 2,2 |
+|---|---:|---:|---:|
+| 0,5 | 0,945 | 0,946 | 0,945 |
+| **0,6** | 0,946 | **0,946** | 0,946 |
+| 0,7 | 0,936 | 0,937 | 0,936 |
+| 0,8 | 0,904 | 0,905 | 0,904 |
+
+*F1 de detección en train con `HUECO_MAX` = 4.086. El resultado cambia poco alrededor del valor elegido; baja si el mínimo supera 0,6.*
+
+**Resultado (train, Otsu):**
+
+| Configuración | IoU | Dice | TP | FP | FN | Precisión | Sensibilidad | F1 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Anterior (relleno 1.500; área fija 6.000 – 22.000) | 0,802 | 0,889 | 1.911 | 124 | 396 | 0,939 | 0,828 | 0,880 |
+| **Nueva (relleno 4.086; área 0,6 – 2,0 × típica)** | **0,822** | **0,902** | **2.125** | **59** | **182** | **0,973** | **0,921** | **0,946** |
+
+El cambio que más aportó fue el relleno de huecos: con el valor anterior, muchas células quedaban como "donas" que Watershed partía en pedazos. Con los mismos cambios, K-means llega a F1 = 0,879 (IoU 0,806) y GMM a F1 = 0,864 (IoU 0,786): **Otsu sigue siendo el mejor método**. La comparación de configuraciones de Otsu (sección 4.4) se repitió con 4.086 y CLAHE + limpieza completa sigue siendo la mejor.
+
+## 11. Características de textura (GLCM) - Bloque B
 
 Para cada eritrocito se calculan características de textura a partir de la matriz de co-ocurrencia de niveles de gris (GLCM).
 
@@ -443,7 +475,7 @@ Para cada eritrocito se calculan características de textura a partir de la matr
 - **Solo píxeles de la célula:** los píxeles del fondo se asignan a un nivel reservado que después se descarta, para que solo cuenten los pares de píxeles que están ambos dentro de la célula.
 - **Características:** contraste, homogeneidad, energía, correlación y entropía (15 en total: 5 propiedades × 3 distancias).
 
-### 10.1. Selección de atributos
+### 11.1. Selección de atributos
 
 El análisis se hizo sobre los recortes del GT de **train** (217 parasitadas y 2.135 no parasitadas).
 
@@ -463,7 +495,7 @@ El análisis se hizo sobre los recortes del GT de **train** (217 parasitadas y 2
 
 Como referencia, el tamaño de la célula (cantidad de píxeles) tiene AUC 0,518: no distingue parasitadas de no parasitadas, por lo que la separación se debe a la textura y no al tamaño.
 
-### 10.2. Umbrales de clasificación
+### 11.2. Umbrales de clasificación
 
 Para cada atributo seleccionado se eligió un umbral sobre la curva ROC de train, con dos criterios:
 - **Youden:** maximiza sensibilidad + especificidad - 1.
@@ -483,7 +515,7 @@ Para estimar si el umbral generaliza a pacientes nuevos se hizo una **validació
 - Las parasitadas están concentradas en un paciente (209C68P29N tiene 145 de las 217 de train).
 - La selección de atributos se hizo con todo train antes de la validación por paciente, por lo que esa validación puede ser algo optimista.
 
-## 11. Integración de los bloques
+## 12. Integración de los bloques
 
 El archivo `main.py` integra el pipeline completo. Por ahora:
 1. Segmenta cada imagen con el método elegido (Bloque A), separa las células pegadas con Watershed y guarda recortes y máscaras de cada célula.
@@ -495,7 +527,7 @@ El archivo `main.py` integra el pipeline completo. Por ahora:
 - **Resultados separados por método:** cada método guarda en `data/shared/pred/<método>/`, para poder comparar sin sobrescribir.
 - **Máscara de glóbulos blancos:** el Bloque C entrega una máscara booleana del tamaño de la imagen con `True` en los núcleos de los glóbulos blancos; el Bloque A elimina después de Watershed los objetos enteros que contienen un núcleo (sección 9).
 
-## 12. Estrategia general del proyecto
+## 13. Estrategia general del proyecto
 
 Se definieron dos estrategias posibles para obtener finalmente **máscaras de eritrocitos parasitados completos**.
 
@@ -518,7 +550,7 @@ También se contempla incorporar detección y exclusión de glóbulos blancos me
 
 Estas etapas todavía no están implementadas en el pipeline actual.
 
-## 13. Evaluación y próximos pasos
+## 14. Evaluación y próximos pasos
 
 **Estado actual:**
 - Otsu, K-means y GMM implementados, con limpieza morfológica, separación de células mediante Watershed, exclusión de glóbulos blancos, filtrado y extracción de células.
@@ -534,7 +566,7 @@ Estas etapas todavía no están implementadas en el pipeline actual.
 
 La evaluación final deberá distinguir entre la calidad de segmentación de píxeles, la detección de células individuales y la identificación de eritrocitos parasitados.
 
-## 14. Bibliografía de referencia
+## 15. Bibliografía de referencia
 
 Walliander, M., et al. (2013). *Automated segmentation of blood cells in Giemsa stained digitized thin blood films*. Diagnostic Pathology, 8(Suppl. 1), S37.
 

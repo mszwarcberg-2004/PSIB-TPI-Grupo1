@@ -12,7 +12,12 @@ from common.config import SEED
 
 KERNEL_APERTURA = 5   # tamaño del kernel de la apertura (elimina ruido y uniones finas)
 KERNEL_CIERRE = 7     # tamaño del kernel del cierre (une pedacitos de una misma célula)
-HUECO_MAX = 1500      # área máxima (en píxeles) de un hueco que se rellena (centro claro del eritrocito) --> tiene un límite porque áreas más grandes pertenecen al fondo.
+HUECO_MAX = 4086      # área máxima (en píxeles) de un hueco que se rellena (centro claro del eritrocito) --> tiene un límite porque áreas más grandes pertenecen al fondo.
+#Antes era 1500, elegido a mano. Ahora sale del GT de train: medimos los huecos que deja Otsu (después de apertura y cierre)
+#y separamos los que caen DENTRO de un eritrocito del GT (son centros claros, hay que rellenarlos) de los que caen en el fondo.
+#Los centros claros miden: mediana 773, percentil 95 = 2800 y percentil 99 = 4086 píxeles. Con 1500 quedaba sin rellenar el 27% de ellos.
+#Elegimos el percentil 99. Probando 1500, 2800 y 4086 sobre train (validación dejando un paciente afuera), 4086 fue el mejor en todas las vueltas:
+#F1 de detección 0.88 --> 0.94 e IoU global 0.802 --> 0.822.
 
 K = 3                 # número de clusters: fondo, eritrocito y zonas oscuras
 N_MUESTRA = 50000     # píxeles que se usan para ajustar K-means y GMM
@@ -51,7 +56,7 @@ def rellenar_huecos_chicos(mascara, area_max): #completa el interior de los erit
     #Idea:
     # 1. busca huecos negros completamente encerrados por regiones blancas
     # 2. calcula cuántos píxeles tiene cada hueco.
-    # 3. Rellena solamente los que tienen un área menor o igual a HUECO_MAX = 1500.
+    # 3. Rellena solamente los que tienen un área menor o igual a HUECO_MAX.
     # Devuelve la máscara con esos huecos rellenados.
 
     # identifica regiones negras completamente rodeadas de blanco y las convierte en blanco. Por ahora, las rellena todas, independientemente del tamaño.

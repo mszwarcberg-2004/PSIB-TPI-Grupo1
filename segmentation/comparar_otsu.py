@@ -28,6 +28,9 @@ from segmentation.cluster_segmentation import (
 
 from texture_eval.seg_metrics import evaluar_segmentacion
 
+# Usamos el mismo HUECO_MAX que el pipeline (4086, sale del GT de train, ver cluster_segmentation.py).
+# La primera versión de esta comparación se hizo con 1500: con 4086 suben las configuraciones que rellenan huecos, pero el orden es el mismo.
+
 def comparar_otsu():
 
     resultados = []

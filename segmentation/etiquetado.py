@@ -6,14 +6,30 @@ import numpy as np
 from skimage.measure import label, regionprops
 from common.io_utils import construir_cell_id
 
-AREA_MIN = 6000         # menor que esto: mancha o ruido (AJUSTAR mirando las áreas reales)
-AREA_MAX = 22000        # mayor que esto: células pegadas o glóbulo blanco (AJUSTAR)
-#Antes eran 800 y 12000, pero en el GT de train un eritrocito mide en promedio ~14000 píxeles (el 81% supera 12000), así que se descartaban la mayoría.
+FACTOR_AREA_MIN = 0.6   # se descarta si mide menos de 0.6 células típicas (pedacitos, ruido)
+FACTOR_AREA_MAX = 2.0   # se descarta si mide más de 2 células típicas (células pegadas que no se separaron)
+#El filtro de área ahora es RELATIVO: el tamaño típico de una célula se calcula en cada imagen (ver area_tipica), sin usar el GT.
+#Así no depende de la escala: si las células se ven más grandes o más chicas, los límites cambian con ellas.
+#Los factores se eligieron sobre train: probamos mínimo 0.3 a 0.8 y máximo 1.4 a 2.2, con validación dejando un paciente afuera,
+#y 0.6 - 2.0 fue el mejor en las 6 vueltas (F1 de detección 0.946). Los vecinos (0.6 - 1.8 o 2.2) dan casi lo mismo (0.946).
+#Historia de los valores fijos anteriores (en píxeles): antes eran 800 y 12000, pero en el GT de train un eritrocito mide en promedio ~14000 píxeles (el 81% supera 12000), así que se descartaban la mayoría.
 #Los nuevos valores salen de mirar las áreas del GT de train (percentil 1 ≈ 8200 y percentil 99 ≈ 19500), dejando algo de margen porque
 #nuestras máscaras salen un poco más chicas que los polígonos del GT. Probándolo con Otsu sobre train: F1 de detección 0.36 --> 0.64, precisión 0.95.
 #Lo que sigue quedando afuera por grande son sobre todo células pegadas, que se van a separar con Watershed.
 DESCARTAR_BORDE = True  # descarta células cortadas por el borde del círculo
 MARGEN_BORDE = 3        # ancho (en píxeles) de la franja que se considera borde
+
+
+#Función area_tipica: estima cuánto mide un eritrocito en ESTA imagen, sin usar el GT.
+#No sirve la mediana común de las áreas: en algunas imágenes (paciente 209) hay cientos de pedacitos chicos de ruido
+#y la mediana da ~2000 píxeles en vez de ~12000. Por eso usamos la mediana PONDERADA por área: ordenamos los objetos
+#de menor a mayor y buscamos el objeto en el que se completa la mitad de todos los píxeles de célula.
+#Los pedacitos chicos tienen pocos píxeles, así que casi no pesan. En train da entre 10000 y 14600 píxeles en todas las imágenes.
+def area_tipica(areas):
+    areas = np.sort(areas)               # de menor a mayor
+    acumulada = np.cumsum(areas)         # píxeles acumulados
+    mitad = acumulada[-1] / 2            # la mitad de todos los píxeles de célula
+    return areas[np.searchsorted(acumulada, mitad)]
 
 
 def etiquetar(mascara): #Recibe la máscara binaria que recibimos luego de segmentar la imagen y hace merge labeling.
@@ -42,11 +58,19 @@ def filtrar_y_extraer(imagen_rgb, etiquetas, campo, patient_id, image_id, split,
     etiquetas_ok = np.zeros(etiquetas.shape, dtype=np.int32) #nueva imagen de etiquetas, inicialmente toda en cero, donde solamente aparecerán las células aceptadas.
     indice = 0 #inicializo el contador que cuenta las células aceptadas
 
+    # Tamaño típico de una célula en esta imagen (con los objetos que no tocan el borde) y límites del filtro de área
+    areas = [r.area for r in regionprops(etiquetas) if interior[r.coords[:, 0], r.coords[:, 1]].all()]
+    if not areas:
+        return filas, etiquetas_ok  # no hay objetos para analizar
+    tipica = area_tipica(areas)
+    area_min = FACTOR_AREA_MIN * tipica
+    area_max = FACTOR_AREA_MAX * tipica
+
     for r in regionprops(etiquetas): #regionprops sirve para medir las propiedades de cada objeto etiquetado
 
         #En primer lugar, aplicamos filtros para ver si las células son aceptadas o no
         # Se descartan objetos demasiados chicos o grandes
-        if r.area < AREA_MIN or r.area > AREA_MAX:
+        if r.area < area_min or r.area > area_max:
             continue
 
         #Se descartan células cortadas por el borde

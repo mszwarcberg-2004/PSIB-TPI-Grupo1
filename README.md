@@ -73,9 +73,14 @@ PSIB-TPI-Grupo1/
 │   ├── notebooks/               # glcm_gt_provisorio.ipynb: análisis de textura sobre el GT
 │   └── results/                 # Ranking de atributos, atributos seleccionados, umbrales
 │
-├── color_stain/                 # Bloque C (todavía sin código)
-│   ├── notebooks/
-│   └── results/
+├── color_stain/                 # Bloque C
+│   ├── c1_analisis_tincion.ipynb       # Análisis de la tinción y de los espacios de color
+│   ├── c2_normalizacion_tincion.ipynb  # Normalización de color y filtros de bordes
+│   ├── c3_mascara_oscura_violeta.ipynb # Manchas oscuras (parásitos) y núcleos de glóbulos blancos
+│   ├── c4_caracteristicas_color.ipynb  # Características de color por célula y selección
+│   ├── normalizacion.py         # Balance de blancos con el fondo de referencia de train
+│   ├── wbc_detection.py         # Detección de núcleos de glóbulos blancos (detectar_wbc)
+│   └── results/                 # referencia_fondo.json, características y máscaras de C1-C4
 │
 └── data/
     ├── raw/                     # Imágenes originales: <paciente>/Img/*.jpg y <paciente>/GT/*.txt
@@ -130,15 +135,16 @@ subset.csv --> cargar_imagen (RGB original)
                   |
    [A] preprocesar_imagen --> campo circular + copia con CLAHE (canal verde) y gaussiano
        segmentar (otsu | kmeans | gmm) --> máscara binaria
-       (& ~mascara_wbc, cuando el Bloque C la entregue)
        limpiar_mascara (apertura, cierre, relleno de huecos chicos)
        separar_celulas (Watershed: separa células pegadas y etiqueta cada una)
-       filtrar_y_extraer (área y borde) --> crops/, masks/, cells_pred.csv
+       excluir_wbc (elimina los objetos que contienen un núcleo de glóbulo blanco de [C] detectar_wbc)
+       filtrar_y_extraer (área relativa a la célula típica de la imagen y borde) --> crops/, masks/, cells_pred.csv
                   |
    [B] cargar_celula --> glcm_celula --> features_texture_<método>.csv
        seg_metrics: evaluar_segmentacion (global) y evaluar_imagen (célula a célula, contra el GT)
                   |
-   [C] (pendiente) detección de glóbulos blancos, características de color, máscara final de infectados
+   [C] detectar_wbc (núcleos violetas y oscuros, usado por [A])
+       (pendiente) características de color, clasificación, parasitemia y máscara final de infectados
 ```
 
 Formatos que comparten los tres bloques:
@@ -147,7 +153,7 @@ Formatos que comparten los tres bloques:
 - **Recorte (`crops/{cell_id}.png`)**: recorte RGB de la imagen **original** (sin CLAHE) dentro del bounding box, con el fondo en negro.
 - **Máscara (`masks/{cell_id}.png`)**: misma forma que el recorte, 255 = célula, 0 = fondo.
 - **`cells_pred.csv`**: `cell_id, image_id, patient_id, split, bbox_x, bbox_y, bbox_w, bbox_h, area, circularidad`.
-- **`mascara_wbc`** (la entrega el Bloque C): matriz booleana del tamaño de la imagen, con `True` donde hay un glóbulo blanco. Se pasa a `procesar_imagen()` y esos píxeles se sacan de la segmentación.
+- **`mascara_wbc`** (la entrega `detectar_wbc` del Bloque C): matriz booleana del tamaño de la imagen, con `True` en los núcleos de los glóbulos blancos. Se pasa a `procesar_imagen()`, que después de Watershed elimina los objetos enteros que contienen un núcleo.
 
 ## 6. Organización del trabajo
 
@@ -164,8 +170,7 @@ Las decisiones y resultados de cada etapa se registran en `report.md`.
 ## Pendientes
 
 **Bloque A**
-- Confirmar Otsu como método final (es el mejor sobre train, también con Watershed) o decidir otro, y dejarlo fijo en `METODO` de `main.py`.
-- Revisar el filtro de área después de Watershed (se calibró antes de incorporarlo) o reemplazarlo por un filtro automático por imagen.
+- Pasar a cada célula segmentada de train la etiqueta del GT (con el matching), para ajustar el clasificador.
 - Inspección visual de la segmentación (contornos de TP, FP y FN sobre algunas imágenes de train) para el informe.
 - Unificar el recorrido de imágenes de `main.py` y `a1_segmentacion_base.py`.
 
@@ -174,9 +179,9 @@ Las decisiones y resultados de cada etapa se registran en `report.md`.
 - Implementar la clasificación de células infectadas e integrarla en `main.py`.
 
 **Bloque C**
-- Detección de glóbulos blancos (`mascara_wbc`).
-- Características cromáticas por célula.
-- Construcción de la máscara final de eritrocitos infectados.
+- Características cromáticas por célula (pasar `caracteristicas_color` de C4 a un `.py` y conectarla en `main.py`).
+- Clasificación, parasitemia y construcción de la máscara final de eritrocitos infectados.
+- Experimento de compresión y descompresión (obligatorio por la consigna).
 
 **General**
 - Evaluación final sobre test, una única vez, con todos los parámetros fijos.
