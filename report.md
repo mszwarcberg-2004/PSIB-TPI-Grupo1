@@ -520,6 +520,7 @@ Para estimar si el umbral generaliza a pacientes nuevos se hizo una **validació
 El archivo `main.py` integra el pipeline completo. Por ahora:
 1. Segmenta cada imagen con el método elegido (Bloque A), separa las células pegadas con Watershed y guarda recortes y máscaras de cada célula.
 2. Calcula las características GLCM de cada célula detectada (Bloque B) y las guarda en `data/shared/features/features_texture_<método>.csv`.
+3. En train, guarda la clase del GT de cada célula detectada (`etiquetas_train.csv`). Se usan los mismos pares célula detectada – célula del GT de la evaluación (IoU ≥ 0,5). De las 2.184 células detectadas en train, 1.926 quedan como sanas, 199 como parasitadas y 59 sin pareja (no son un eritrocito del GT). Con esto se eligen los umbrales del clasificador sobre nuestras células y no sobre los recortes del GT, porque son las que va a recibir el clasificador. Test no se usa.
 
 **Decisiones sobre los formatos compartidos:**
 - **Identificador único de célula (`cell_id`):** `{paciente}_{imagen}_{número de 4 dígitos}`. Permite unir las características de textura y de color de una misma célula.
@@ -556,7 +557,7 @@ Estas etapas todavía no están implementadas en el pipeline actual.
 - Otsu, K-means y GMM implementados, con limpieza morfológica, separación de células mediante Watershed, exclusión de glóbulos blancos, filtrado y extracción de células.
 - Evaluación global (IoU, Dice) y célula a célula (TP, FP, FN, precisión, sensibilidad, F1) sobre train.
 - Características de textura GLCM calculadas y analizadas sobre el GT de train.
-- Pipeline de `main.py` funcionando para segmentación y textura.
+- Pipeline de `main.py` funcionando para segmentación y textura, con la clase del GT de cada célula detectada de train.
 
 **Próximos pasos:**
 1. Confirmar el método de segmentación final (propuesta: Otsu) y revisar el filtro de área después de Watershed.

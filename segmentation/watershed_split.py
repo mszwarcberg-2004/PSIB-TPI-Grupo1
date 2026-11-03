@@ -11,16 +11,6 @@ FACTOR_DISTANCIA = 0.7  # distancia mínima entre dos centros de células, como 
 #Se eligió comparando 0.5, 0.7 y 0.9 sobre train (detección célula a célula): 0.7 fue el mejor para K-means y casi igual al mejor para Otsu.
 
 
-#Idea general:
-#Cuando dos eritrocitos se tocan, Otsu (o K-means/GMM) los deja como un único objeto blanco, y el etiquetado les da la misma etiqueta.
-#Watershed los separa así:
-# 1. Calcula la transformada de distancia: a cada píxel blanco le asigna su distancia al fondo negro más cercano.
-#    En el centro de cada eritrocito la distancia es máxima, y en la "cintura" donde se tocan dos células es más chica.
-# 2. Busca los máximos locales de esa distancia: cada máximo es el centro de una célula (marcador).
-# 3. Imagina la distancia invertida como un relieve con un "pozo" en cada centro, lo "inunda" desde los marcadores
-#    y, donde se encuentran las aguas de dos pozos distintos, traza el límite entre las dos células.
-
-
 #Función estimar_radio: calcula automáticamente el radio típico de un eritrocito en ESA imagen, sin usar el GT.
 def estimar_radio(distancia, etiquetas):
 

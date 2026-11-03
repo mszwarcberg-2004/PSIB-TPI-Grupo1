@@ -90,7 +90,8 @@ PSIB-TPI-Grupo1/
         ├── pred/<método>/       # Resultados de la segmentación (NO se sube a GitHub)
         │   ├── crops/           # Recorte RGB de cada célula (fondo negro)
         │   ├── masks/           # Máscara individual de cada célula
-        │   └── cells_pred.csv   # Una fila por célula detectada
+        │   ├── cells_pred.csv   # Una fila por célula detectada
+        │   └── etiquetas_train.csv  # Clase del GT de cada célula detectada de train (la genera main.py)
         └── features/            # CSV de características (los genera main.py)
 ```
 
@@ -142,6 +143,7 @@ subset.csv --> cargar_imagen (RGB original)
                   |
    [B] cargar_celula --> glcm_celula --> features_texture_<método>.csv
        seg_metrics: evaluar_segmentacion (global) y evaluar_imagen (célula a célula, contra el GT)
+       con los pares de evaluar_imagen, main.py guarda la clase del GT de cada célula detectada --> etiquetas_train.csv
                   |
    [C] detectar_wbc (núcleos violetas y oscuros, usado por [A])
        (pendiente) características de color, clasificación, parasitemia y máscara final de infectados
@@ -153,6 +155,7 @@ Formatos que comparten los tres bloques:
 - **Recorte (`crops/{cell_id}.png`)**: recorte RGB de la imagen **original** (sin CLAHE) dentro del bounding box, con el fondo en negro.
 - **Máscara (`masks/{cell_id}.png`)**: misma forma que el recorte, 255 = célula, 0 = fondo.
 - **`cells_pred.csv`**: `cell_id, image_id, patient_id, split, bbox_x, bbox_y, bbox_w, bbox_h, area, circularidad`.
+- **`etiquetas_train.csv`**: `cell_id, image_id, patient_id, clase_gt, iou_gt`. `clase_gt` es `Parasitized` o `Uninfected` si la célula detectada tiene pareja en el GT (IoU ≥ 0,5), o `sin_pareja` si no. Sirve para elegir los umbrales del clasificador, solo con train.
 - **`mascara_wbc`** (la entrega `detectar_wbc` del Bloque C): matriz booleana del tamaño de la imagen, con `True` en los núcleos de los glóbulos blancos. Se pasa a `procesar_imagen()`, que después de Watershed elimina los objetos enteros que contienen un núcleo.
 
 ## 6. Organización del trabajo
@@ -170,7 +173,6 @@ Las decisiones y resultados de cada etapa se registran en `report.md`.
 ## Pendientes
 
 **Bloque A**
-- Pasar a cada célula segmentada de train la etiqueta del GT (con el matching), para ajustar el clasificador.
 - Inspección visual de la segmentación (contornos de TP, FP y FN sobre algunas imágenes de train) para el informe.
 - Unificar el recorrido de imágenes de `main.py` y `a1_segmentacion_base.py`.
 
