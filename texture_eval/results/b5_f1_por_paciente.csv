@@ -1,0 +1,7 @@
+paciente,n_parasitadas,Color (b_rel_p1),Textura (contrast_d3),Color AND textura,Color OR textura,Logística color,Logística textura,Logística color+textura
+208C67P28N_ThinF,21,0.75,0.9302,0.9302,0.75,0.9333,0.9302,0.8889
+209C68P29N_ThinF,145,0.7967,0.9158,0.8,0.9128,0.8864,0.9097,0.9686
+211C70P31_ThinF,37,0.9487,0.8824,0.8824,0.9487,0.8485,0.8657,0.9296
+212C71P32_ThinF,5,0.5263,0.6667,0.75,0.5,0.6667,0.8,0.625
+263C115P76ThinF,5,0.3,0.0,0.0,0.3,0.0,0.0,0.0
+282C134P95ThinF,4,0.8571,0.8571,0.8571,0.8571,1.0,0.8571,0.4

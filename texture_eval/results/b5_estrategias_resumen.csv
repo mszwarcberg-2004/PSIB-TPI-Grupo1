@@ -1,0 +1,8 @@
+estrategia,TP,FP,FN,precision,sensibilidad,F1
+Color (b_rel_p1),167,42,50,0.799,0.7696,0.784
+Textura (contrast_d3),192,25,25,0.8848,0.8848,0.8848
+Color AND textura,154,10,63,0.939,0.7097,0.8084
+Color OR textura,205,57,12,0.7824,0.9447,0.8559
+Logística color,175,19,42,0.9021,0.8065,0.8516
+Logística textura,192,28,25,0.8727,0.8848,0.8787
+Logística color+textura,198,21,19,0.9041,0.9124,0.9083
