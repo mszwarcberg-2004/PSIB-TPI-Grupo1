@@ -1,0 +1,55 @@
+{
+  "regla": "Tiene mancha de C3",
+  "descripcion": "parasitada si la célula tiene al menos una mancha oscura de la máscara de C3 (n_manchas >= 1)",
+  "params_mascara_c3": {
+    "canal": "G",
+    "modo": "relativo",
+    "erosion": 5,
+    "umbral": -39,
+    "area_min": 50
+  },
+  "normalizacion_fondo_ref_rgb": [
+    220.33333333333334,
+    181.08333333333334,
+    166.41666666666666
+  ],
+  "alternativa_descartada": {
+    "regla": "Mayoría de 3 (Máximo F1)",
+    "minimo_que_superan": 2,
+    "condiciones": [
+      "b_rel_p1 <= -8.6600",
+      "contraste_G_mancha >= 56.4616",
+      "a_desvio >= 4.0798"
+    ],
+    "rangos_color": {
+      "umbral_oscuro": 126.0,
+      "umbral_violeta": 126.0,
+      "bordes_hist": {
+        "G": [
+          113.0,
+          121.625,
+          130.25,
+          138.875,
+          147.5,
+          156.125,
+          164.75,
+          173.375,
+          182.0
+        ],
+        "b": [
+          122.0,
+          124.5,
+          127.0,
+          129.5,
+          132.0,
+          134.5,
+          137.0,
+          139.5,
+          142.0
+        ]
+      },
+      "calculado_con": "train"
+    }
+  },
+  "calculado_con": "train (6 pacientes)"
+}

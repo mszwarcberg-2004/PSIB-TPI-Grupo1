@@ -1,0 +1,3 @@
+# Máscaras de regiones candidatas y de glóbulos blancos que genera el notebook C3.
+# Son resultados intermedios: se regeneran al ejecutar C3 y el pipeline las calcula con color_candidates.py.
+c3_candidatas/
