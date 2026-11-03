@@ -6,7 +6,7 @@
 #   1. Preprocesamiento: campo circular, CLAHE y filtro gaussiano.                  (Bloque A)
 #   2. Segmentación con el método elegido (Otsu; K-means y GMM quedaron para comparar). (Bloque A)
 #   3. Limpieza morfológica y Watershed para separar células pegadas.               (Bloque A)
-#   4. Exclusión de glóbulos blancos (la máscara la entrega el Bloque C).           (A + C) -> PENDIENTE
+#   4. Exclusión de glóbulos blancos (la máscara la entrega el Bloque C).           (A + C)
 #   5. Filtrado por área y borde, recorte y máscara de cada célula.                 (Bloque A)
 #   6. Atributos de textura de cada célula (GLCM).                                  (Bloque B)
 #   7. Atributos de color de cada célula.                                           (Bloque C) -> PENDIENTE
@@ -29,13 +29,15 @@ from segmentation.a1_segmentacion_base import procesar_imagen as segmentar_image
 from segmentation.a1_segmentacion_base import limpiar_resultados_anteriores
 from segmentation.a1_segmentacion_base import gt_sin_borde, CLASES_ERITROCITOS
 
+# Bloque C: detección de glóbulos blancos por color (núcleos violetas y oscuros)
+from color_stain.wbc_detection import detectar_wbc
+
 # Bloque B: extracción de características de textura y métricas de evaluación
 from texture_eval.glcm_features import glcm_celula
 from texture_eval.seg_metrics import evaluar_segmentacion, evaluar_imagen
 
 
 # Cuando cada bloque tenga sus funciones, se importan acá:
-# from color_stain.wbc_detection import detectar_wbc                 # Bloque C (paso 4)
 # from color_stain.color_features import calcular_color              # Bloque C (paso 7)
 # from color_stain.clasificador import clasificar_celula             # Bloques B + C (paso 8)
 # from color_stain.infected_seg import construir_mascara_infectados  # Bloque C (paso 9)
@@ -59,12 +61,11 @@ def procesar_imagen(imagen_rgb, patient_id, image_id, split, rutas):
     # Watershed, filtrado por área y borde, y guarda el recorte y la máscara de cada célula.
     # Devuelve: células aceptadas (filas), máscara binaria, imagen de etiquetas de las células aceptadas y campo circular.
 
-    # PASO 4 (PENDIENTE, Bloque C): exclusión de glóbulos blancos.
-    # La máscara de núcleos violetas ya existe en el notebook C3 (color_stain/c3_mascara_oscura_violeta.ipynb, función mascara_wbc),
-    # pero todavía no está pasada a un archivo .py. Iría en color_stain/wbc_detection.py como detectar_wbc(imagen_rgb).
-    # Ojo: hay que eliminar el OBJETO entero que contiene el núcleo (después de Watershed, dentro de procesar_imagen de a1),
-    # no solo los píxeles del núcleo, porque si no el citoplasma queda como un anillo que pasa por eritrocito.
-    mascara_wbc = None  # cuando esté: mascara_wbc = detectar_wbc(imagen_rgb), con True donde hay un glóbulo blanco
+    # PASO 4 (Bloques C + A): exclusión de glóbulos blancos.
+    # detectar_wbc (color_stain/wbc_detection.py) marca los núcleos violetas y oscuros (True = núcleo de glóbulo blanco).
+    # Después, dentro de segmentar_imagen, se elimina el OBJETO entero que contiene cada núcleo (después de Watershed),
+    # no solo los píxeles del núcleo, porque si no el citoplasma queda como pedazos que pasan por eritrocitos.
+    mascara_wbc = detectar_wbc(imagen_rgb)
 
     filas, mascara, etiquetas, campo = segmentar_imagen(
         imagen_rgb, patient_id, image_id, split, rutas, METODO, mascara_wbc

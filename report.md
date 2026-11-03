@@ -381,7 +381,58 @@ Se probó sobre train con Otsu, manteniendo los mismos marcadores (centros) y ca
 
 **Decisión:** mantener la distancia al fondo. Sobel y Prewitt con gaussiano son los mejores detectores de bordes (C2), pero usar el gradiente en Watershed no mejoró la detección, porque los bordes entre células en contacto son débiles y los parásitos generan bordes internos (la respuesta del filtro dentro de las células parasitadas es 5 a 7 veces mayor que en las sanas).
 
-## 9. Características de textura (GLCM) - Bloque B
+## 9. Exclusión de glóbulos blancos
+
+### 9.1. Problema
+
+Las imágenes tienen algunos glóbulos blancos (10 en train). Son más grandes que un eritrocito y Otsu los segmenta igual que a los eritrocitos, porque también son más oscuros que el fondo. Watershed suele cortarlos en varios pedazos, y en train **3 de esos pedazos entraban en el filtro de área** y se guardaban como si fueran eritrocitos. Esos falsos eritrocitos después se analizarían en textura, color y clasificación.
+
+### 9.2. Idea: detectar el núcleo y eliminar el objeto que lo contiene
+
+Un glóbulo blanco tiene dos partes:
+- **Núcleo:** grande, violeta y muy oscuro. Es lo que lo distingue claramente de un eritrocito.
+- **Citoplasma:** claro, con un color parecido al de los eritrocitos o al fondo. Por color no se puede distinguir.
+
+Por eso no se busca el glóbulo blanco completo por color, sino solo su **núcleo**, y después se elimina el **objeto segmentado entero** que lo contiene (núcleo y citoplasma). Si solo se borraran los píxeles del núcleo, el citoplasma quedaría como pedazos que pasan por eritrocitos.
+
+### 9.3. Procedimiento
+
+**Paso 1 – Detección de núcleos por color** (`color_stain/wbc_detection.py`, `detectar_wbc`), sin usar el GT:
+1. Se normaliza el color de la imagen con el balance de blancos (Bloque C, C2): cada canal R, G, B se multiplica para que el fondo quede igual a un **fondo de referencia**, que es el promedio del fondo de las 12 imágenes de train (R = 220, G = 181, B = 166). La referencia se guarda en `color_stain/results/referencia_fondo.json` y se usa sin cambios para cualquier imagen nueva (incluido test).
+2. Se marcan los píxeles que son a la vez **violetas** (canal b de Lab < 127) y **oscuros** (canal G < 100).
+3. Se aplica una apertura (disco de radio 3) para borrar puntos sueltos.
+4. Se conservan solo las regiones de **al menos 6.000 píxeles**: un parásito es chico; un núcleo de glóbulo blanco es grande.
+
+El resultado es una máscara con los núcleos de los glóbulos blancos.
+
+**Paso 2 – Eliminación de objetos** (`segmentation/a1_segmentacion_base.py`, `excluir_wbc`): después de Watershed, para cada objeto se calcula qué fracción de sus píxeles cae sobre un núcleo. Si es **al menos el 10 %**, se elimina el objeto entero. Luego se aplica el filtro de área y borde como siempre.
+
+### 9.4. Origen de cada criterio
+
+| Criterio | Valor | Origen |
+|---|---|---|
+| Violeta | b < 127 | Bloque C (C1): umbral de Youden para separar glóbulos blancos de eritrocitos, píxel a píxel (AUC 0,92), solo train. |
+| Oscuro | G < 100 | Bloque C (C1): el núcleo tiene G ≈ 52 (mediana) y el 95 % de los píxeles de eritrocitos parasitados tiene G > 124. |
+| Tamaño mínimo del núcleo | 6.000 píxeles | Se probaron 3.000, 6.000 y 12.000 con el mismo resultado; se eligió el valor central. |
+| Fracción de núcleo en el objeto | 10 % | En train, los pedazos de glóbulo blanco tenían entre 68 % y 96 % de núcleo y los eritrocitos 0 %; el valor queda lejos de ambos grupos. |
+
+**Por qué se agregó la condición de oscuridad:** la máscara original de C3 usaba solo el criterio violeta (b < 127, regiones de al menos 12.000 píxeles). Aplicada a la segmentación, en las imágenes del paciente 209 (el de tinción más intensa) también marcaba eritrocitos, y se eliminaban **3 células parasitadas y 3 sanas**, lo que haría subestimar la parasitemia. Exigir además que el píxel sea muy oscuro deja marcados solo los núcleos.
+
+### 9.5. Resultados (train, Otsu con Watershed)
+
+| Criterio | Pedazos de glóbulo blanco aceptados | Parasitadas perdidas | Sanas perdidas | F1 de detección |
+|---|---:|---:|---:|---:|
+| Sin exclusión | 3 | – | – | 0,8796 |
+| Solo violeta (C3) | 0 | 3 | 3 | 0,8789 |
+| Violeta y oscuro, G < 120 | 0 | 0 – 9 (según el tamaño mínimo) | 1 – 3 | 0,878 – 0,880 |
+| **Violeta y oscuro, G < 100 (elegido)** | **0** | **0** | **0** | **0,8802** |
+| Violeta y oscuro, G < 80 | 0 | 0 | 0 | 0,880 – 0,881 |
+
+Con G < 80 o G < 100 y cualquier tamaño mínimo entre 3.000 y 12.000 píxeles, el resultado es el mismo: se eliminan todos los pedazos de glóbulo blanco sin perder eritrocitos. El criterio no depende de un ajuste fino. El IoU y el Dice globales no cambian (0,8016 y 0,8894).
+
+**Limitación:** en train hay solo 10 glóbulos blancos, por lo que la validación es limitada.
+
+## 10. Características de textura (GLCM) - Bloque B
 
 Para cada eritrocito se calculan características de textura a partir de la matriz de co-ocurrencia de niveles de gris (GLCM).
 
@@ -392,7 +443,7 @@ Para cada eritrocito se calculan características de textura a partir de la matr
 - **Solo píxeles de la célula:** los píxeles del fondo se asignan a un nivel reservado que después se descarta, para que solo cuenten los pares de píxeles que están ambos dentro de la célula.
 - **Características:** contraste, homogeneidad, energía, correlación y entropía (15 en total: 5 propiedades × 3 distancias).
 
-### 9.1. Selección de atributos
+### 10.1. Selección de atributos
 
 El análisis se hizo sobre los recortes del GT de **train** (217 parasitadas y 2.135 no parasitadas).
 
@@ -412,7 +463,7 @@ El análisis se hizo sobre los recortes del GT de **train** (217 parasitadas y 2
 
 Como referencia, el tamaño de la célula (cantidad de píxeles) tiene AUC 0,518: no distingue parasitadas de no parasitadas, por lo que la separación se debe a la textura y no al tamaño.
 
-### 9.2. Umbrales de clasificación
+### 10.2. Umbrales de clasificación
 
 Para cada atributo seleccionado se eligió un umbral sobre la curva ROC de train, con dos criterios:
 - **Youden:** maximiza sensibilidad + especificidad - 1.
@@ -432,7 +483,7 @@ Para estimar si el umbral generaliza a pacientes nuevos se hizo una **validació
 - Las parasitadas están concentradas en un paciente (209C68P29N tiene 145 de las 217 de train).
 - La selección de atributos se hizo con todo train antes de la validación por paciente, por lo que esa validación puede ser algo optimista.
 
-## 10. Integración de los bloques
+## 11. Integración de los bloques
 
 El archivo `main.py` integra el pipeline completo. Por ahora:
 1. Segmenta cada imagen con el método elegido (Bloque A), separa las células pegadas con Watershed y guarda recortes y máscaras de cada célula.
@@ -442,9 +493,9 @@ El archivo `main.py` integra el pipeline completo. Por ahora:
 - **Identificador único de célula (`cell_id`):** `{paciente}_{imagen}_{número de 4 dígitos}`. Permite unir las características de textura y de color de una misma célula.
 - **Recortes de la imagen original:** los recortes se extraen de la imagen RGB original, no de la preprocesada, para que los Bloques B y C trabajen con los colores e intensidades reales.
 - **Resultados separados por método:** cada método guarda en `data/shared/pred/<método>/`, para poder comparar sin sobrescribir.
-- **Máscara de glóbulos blancos:** el Bloque C entregará una máscara booleana del tamaño de la imagen con `True` en los glóbulos blancos; esos píxeles se eliminan de la segmentación antes de la limpieza morfológica.
+- **Máscara de glóbulos blancos:** el Bloque C entrega una máscara booleana del tamaño de la imagen con `True` en los núcleos de los glóbulos blancos; el Bloque A elimina después de Watershed los objetos enteros que contienen un núcleo (sección 9).
 
-## 11. Estrategia general del proyecto
+## 12. Estrategia general del proyecto
 
 Se definieron dos estrategias posibles para obtener finalmente **máscaras de eritrocitos parasitados completos**.
 
@@ -467,10 +518,10 @@ También se contempla incorporar detección y exclusión de glóbulos blancos me
 
 Estas etapas todavía no están implementadas en el pipeline actual.
 
-## 12. Evaluación y próximos pasos
+## 13. Evaluación y próximos pasos
 
 **Estado actual:**
-- Otsu, K-means y GMM implementados, con limpieza morfológica, separación de células mediante Watershed, filtrado y extracción de células.
+- Otsu, K-means y GMM implementados, con limpieza morfológica, separación de células mediante Watershed, exclusión de glóbulos blancos, filtrado y extracción de células.
 - Evaluación global (IoU, Dice) y célula a célula (TP, FP, FN, precisión, sensibilidad, F1) sobre train.
 - Características de textura GLCM calculadas y analizadas sobre el GT de train.
 - Pipeline de `main.py` funcionando para segmentación y textura.
@@ -478,13 +529,12 @@ Estas etapas todavía no están implementadas en el pipeline actual.
 **Próximos pasos:**
 1. Confirmar el método de segmentación final (propuesta: Otsu) y revisar el filtro de área después de Watershed.
 2. Inspeccionar visualmente la segmentación sobre imágenes de train.
-3. Incorporar la detección y exclusión de glóbulos blancos (Bloque C).
-4. Recalcular la textura sobre las células segmentadas y desarrollar la identificación de eritrocitos parasitados con características de color y textura.
-5. Evaluar el algoritmo final sobre el **conjunto de test**, una sola vez, manteniendo los parámetros fijos.
+3. Recalcular la textura sobre las células segmentadas y desarrollar la identificación de eritrocitos parasitados con características de color y textura.
+4. Evaluar el algoritmo final sobre el **conjunto de test**, una sola vez, manteniendo los parámetros fijos.
 
 La evaluación final deberá distinguir entre la calidad de segmentación de píxeles, la detección de células individuales y la identificación de eritrocitos parasitados.
 
-## 13. Bibliografía de referencia
+## 14. Bibliografía de referencia
 
 Walliander, M., et al. (2013). *Automated segmentation of blood cells in Giemsa stained digitized thin blood films*. Diagnostic Pathology, 8(Suppl. 1), S37.
 

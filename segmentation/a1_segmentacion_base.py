@@ -4,6 +4,7 @@
 import cv2
 import numpy as np
 import pandas as pd
+from scipy import ndimage as ndi
 from common.config import rutas_segmentacion
 from common.io_utils import cargar_subset, cargar_imagen, cargar_gt
 from common.generar_gt_utils import mapa_gt
@@ -12,9 +13,12 @@ from segmentation.cluster_segmentation import segmentar, limpiar_mascara
 from segmentation.etiquetado import etiquetar, filtrar_y_extraer, MARGEN_BORDE
 from segmentation.watershed_split import separar_celulas
 from texture_eval.seg_metrics import evaluar_segmentacion, evaluar_imagen
+from color_stain.wbc_detection import detectar_wbc
 
 CLASES_ERITROCITOS = ["Parasitized", "Uninfected"]  # el GT de glóbulos blancos no se incluye
 APLICAR_WATERSHED = True  # True: separa células pegadas con Watershed. False: etiquetado simple (como antes), sirve para comparar
+EXCLUIR_WBC = True        # True: saca los glóbulos blancos detectados por color (Bloque C). False: no los saca, sirve para comparar
+FRACCION_NUCLEO_WBC = 0.10  # un objeto se descarta como glóbulo blanco si al menos el 10% de sus píxeles cae en un núcleo violeta y oscuro
 
 
 def procesar_imagen(imagen_rgb, patient_id, image_id, split, rutas, metodo="otsu", mascara_wbc=None): #procesa una imagen
@@ -31,9 +35,7 @@ def procesar_imagen(imagen_rgb, patient_id, image_id, split, rutas, metodo="otsu
     # 2. Segmentación semántica con el método elegido (otsu, kmeans o gmm)
     mascara_inicial, _ = segmentar(metodo, imagen_preprocesada, campo)
 
-    # 3. Excluir glóbulos blancos (cuando C entregue la máscara; hasta entonces es None)
-    if mascara_wbc is not None:
-        mascara_inicial = mascara_inicial & ~mascara_wbc  # ~ invierte la máscara: nos quedamos con lo que NO es glóbulo blanco
+    # 3. (Antes acá se borraban los píxeles de glóbulos blancos. Ahora se sacan los objetos enteros en el paso 5b, ver más abajo.)
 
     # 4. Apertura, cierre y relleno de huecos (igual para todos los métodos)
     mascara_limpia = limpiar_mascara(mascara_inicial)
@@ -45,6 +47,11 @@ def procesar_imagen(imagen_rgb, patient_id, image_id, split, rutas, metodo="otsu
     else:
         etiquetas = etiquetar(mascara_limpia)
 
+    # 5b. Excluir glóbulos blancos (la máscara de núcleos la entrega el Bloque C, ver color_stain/wbc_detection.py)
+    # Se hace DESPUÉS de Watershed y sobre objetos enteros, no sobre píxeles (ver excluir_wbc más abajo).
+    if mascara_wbc is not None:
+        etiquetas = excluir_wbc(etiquetas, mascara_wbc)
+
     # 6. Filtrar y extraer las células individuales
     # Usamos la imagen RGB ORIGINAL para conservar sus colores reales
     filas, etiquetas_ok = filtrar_y_extraer(
@@ -53,6 +60,26 @@ def procesar_imagen(imagen_rgb, patient_id, image_id, split, rutas, metodo="otsu
 
     # Devolvemos las células, la máscara final, las etiquetas aceptadas y el campo circular
     return filas, mascara_limpia, etiquetas_ok, campo
+
+
+#Función excluir_wbc: elimina de la imagen de etiquetas los objetos que son (o contienen) el núcleo de un glóbulo blanco.
+#Por qué objetos enteros y no píxeles: la máscara del Bloque C marca solo el NÚCLEO del glóbulo blanco. Si borráramos solo esos píxeles,
+#el citoplasma (más claro) quedaría como un anillo o como pedazos que pasan por eritrocitos. Además, Watershed suele cortar el glóbulo
+#blanco en varios pedazos, y antes 3 de esos pedazos entraban en el filtro de área como si fueran eritrocitos (medido en train).
+def excluir_wbc(etiquetas, mascara_wbc):
+
+    # Para cada objeto, qué fracción de sus píxeles cae dentro de un núcleo de glóbulo blanco
+    # (ndi.mean calcula el promedio de la máscara dentro de cada etiqueta = fracción de píxeles en True)
+    ids = np.arange(1, etiquetas.max() + 1)
+    fraccion = ndi.mean(mascara_wbc, labels=etiquetas, index=ids)
+
+    # Objetos a descartar: los que tienen al menos FRACCION_NUCLEO_WBC de núcleo adentro
+    ids_wbc = ids[np.asarray(fraccion) >= FRACCION_NUCLEO_WBC]
+
+    # Esos objetos pasan a ser fondo (0); el resto queda igual
+    return np.where(np.isin(etiquetas, ids_wbc), 0, etiquetas)
+#Probado sobre train: se eliminan los 3 pedazos de glóbulo blanco que antes se aceptaban, sin perder ningún eritrocito
+#(ni parasitado ni sano), y el F1 de detección pasa de 0.8796 a 0.8802.
 
 
 def limpiar_resultados_anteriores(rutas): #que se borren las máscaras anteriores si estaban mal y lo estoy corriendo de nuevo
@@ -109,9 +136,12 @@ def segmentacion_base(split="train", metodo="otsu"): #procesa todas las imágene
         patient_id, image_id = imagen["patient_id"], imagen["image_id"]
         imagen_rgb = cargar_imagen(patient_id, image_id)
 
+        # Máscara de núcleos de glóbulos blancos (Bloque C), solo si está activada la exclusión
+        mascara_wbc = detectar_wbc(imagen_rgb) if EXCLUIR_WBC else None
+
         #Acá procesamos la imagen
         filas, mascara_limpia, etiquetas_ok, campo = procesar_imagen(
-            imagen_rgb, patient_id, image_id, imagen["split"], rutas, metodo
+            imagen_rgb, patient_id, image_id, imagen["split"], rutas, metodo, mascara_wbc
         )
 
         filas_total.extend(filas) #Agrega a filas_total las células detectadas y aceptadas en la imagen actual.
