@@ -86,10 +86,7 @@ def limpiar_mascara(mascara): #Objetivo: mejorar la máscara binaria obtenida me
 # MÉTODOS: K-MEANS Y GMM (clustering por color)
 #Pasamos a Lab porque separa el brillo (L) de la información cromática (a y b), y así el fondo claro se distingue fácil por L.
 
-#Usamos SOLO el espacio Lab. Antes la función también aceptaba RGB y HSV, pero los sacamos porque:
-# - En el análisis de color del Bloque C (notebook C1), Lab fue el espacio que mejor agrupó los píxeles sin etiquetas
-#   (ARI: Lab 0.38 con K-means y 0.41 con GMM; RGB 0.32 y 0.41; HSV 0.38 y 0.39).
-# - En HSV el tono H es circular (el rosa está a la vez cerca de 0 y de 179), así que agrupar con H sin corregir da grupos mal armados.
+#Usamos SOLO el espacio Lab. En el análisis de color hecho en C, Lab fue el espacio que mejor agrupó los píxeles sin etiquetas
 
 def _agrupar_por_color(imagen_rgb, campo, modelo):
     # Ajusta el modelo sobre una muestra de píxeles en el espacio Lab. Devuelve la máscara binaria de eritrocitos y los centros de los clusters.
