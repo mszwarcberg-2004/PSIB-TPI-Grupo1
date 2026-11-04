@@ -1,0 +1,28 @@
+{
+  "metodo": "C5 AND textura",
+  "f1_lopo": 0.8564,
+  "f1_lopo_c5_sola": 0.8203,
+  "margen_usado": 0.02,
+  "sel_color": [
+    "b_rel_p1",
+    "contraste_G_mancha",
+    "a_desvio",
+    "G_hist_0",
+    "frac_violeta",
+    "b_desvio",
+    "b_hist_2",
+    "a_p95"
+  ],
+  "sel_tex": [
+    "contrast_d3",
+    "entropy_d2",
+    "correlation_d1"
+  ],
+  "regla_textura": {
+    "atributo": "contrast_d3",
+    "signo": 1,
+    "umbral": 0.7086044454407947
+  },
+  "segmentacion": "otsu",
+  "calculado_con": "train (6 pacientes, 2184 células segmentadas)"
+}

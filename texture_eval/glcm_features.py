@@ -78,3 +78,24 @@ def glcm_celula(crop_rgb, mask): #Funcion principal: recibe una célula recortad
     for i, d in enumerate(DISTANCES):
         out[f"entropy_d{d}"] = ent[i].mean()
     return out
+
+def extraer_features(cells_csv, out_csv):
+    """Lee cells_gt.csv o cells_pred.csv, calcula la GLCM de cada célula y guarda
+    cell_id + descriptores."""
+    cells = pd.read_csv(cells_csv)
+    filas = []
+    for _, r in cells.iterrows():
+        p_crop, p_mask = Path(r.crop_path), Path(r.mask_path)
+        p_crop = p_crop if p_crop.is_absolute() else Path(ROOT) / p_crop
+        p_mask = p_mask if p_mask.is_absolute() else Path(ROOT) / p_mask
+        crop = cv2.cvtColor(cv2.imread(str(p_crop)), cv2.COLOR_BGR2RGB)
+        mask = cv2.imread(str(p_mask), cv2.IMREAD_GRAYSCALE)
+        feats = glcm_celula(crop, mask)
+        if feats is None:
+            print(f"[aviso] sin pares válidos: {r.cell_id}")
+            continue
+        filas.append({"cell_id": r.cell_id, **feats})
+    out = pd.DataFrame(filas)
+    Path(out_csv).parent.mkdir(parents=True, exist_ok=True)
+    out.to_csv(out_csv, index=False)
+    return out

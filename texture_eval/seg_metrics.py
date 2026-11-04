@@ -1,10 +1,9 @@
-# Función del archivo: evaluación de distintos métodos de segmentación.
-# Permite comparar una máscara predicha con el Ground Truth usando IoU y Dice.
-# Además, permite evaluar la detección individual de eritrocitos mediante matching.
+"""B3: métricas de segmentación y matching predicción-GT."""
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
-
+import cv2
+import pandas as pd
 
 # 1. EVALUACIÓN GLOBAL DE LA SEGMENTACIÓN
 
@@ -56,28 +55,31 @@ def matriz_iou(gt, pred, devolver_conteos=False):
     Devuelve (iou[nG, nP], ids_gt, ids_pred).
     Con devolver_conteos=True devuelve además (inter[nG, nP], area_gt, area_pred) en píxeles."""
 
-    ids_g, g_idx = np.unique(gt, return_inverse=True)
-    ids_p, p_idx = np.unique(pred, return_inverse=True)
+    # Solo se consideran los píxeles que pertenecen a alguna célula (GT o predicción).
+    # El fondo es casi toda la imagen y no aporta a ninguna intersección, así que no hace falta ordenarlo
+    celulas = (gt > 0) | (pred > 0)
+    g = gt[celulas].astype(np.int64)
+    p = pred[celulas].astype(np.int64)
 
-    # Fuerzo que el fondo (0) sea siempre el primer id
-    if ids_g[0] != 0:
-        ids_g = np.r_[0, ids_g]
-        g_idx = g_idx + 1
-
-    if ids_p[0] != 0:
-        ids_p = np.r_[0, ids_p]
-        p_idx = p_idx + 1
-
-    nG, nP = len(ids_g), len(ids_p)
+    # Los ids van de 0 a N (el 0 es el fondo): se usan directamente como índices
+    nG, nP = int(gt.max()) + 1, int(pred.max()) + 1
 
     # Cuenta cuántos píxeles comparte cada par (GT, pred): la intersección
     inter = np.bincount(
-        g_idx.ravel() * nP + p_idx.ravel(),
+        g * nP + p,
         minlength=nG * nP
     ).reshape(nG, nP).astype(np.float64)
 
     # Áreas de cada célula
     area_g, area_p = inter.sum(1), inter.sum(0)
+
+    # Ids que realmente aparecen en cada mapa (sin el fondo)
+    ids_g = np.flatnonzero(area_g[1:] > 0) + 1
+    ids_p = np.flatnonzero(area_p[1:] > 0) + 1
+
+    # Quedarse solo con las filas y columnas de esas células
+    inter = inter[np.ix_(ids_g, ids_p)]
+    area_g, area_p = area_g[ids_g], area_p[ids_p]
 
     # Unión = A + B - intersección
     union = area_g[:, None] + area_p[None, :] - inter
@@ -86,11 +88,9 @@ def matriz_iou(gt, pred, devolver_conteos=False):
     with np.errstate(divide="ignore", invalid="ignore"):
         M = np.where(union > 0, inter / union, 0.0)
 
-    # Devolver la matriz de IoU sin incluir el fondo
     if devolver_conteos:
-        return M[1:, 1:], ids_g[1:], ids_p[1:], inter[1:, 1:], area_g[1:], area_p[1:]
-    return M[1:, 1:], ids_g[1:], ids_p[1:]
-
+        return M, ids_g, ids_p, inter, area_g, area_p
+    return M, ids_g, ids_p
 
 
 
@@ -126,7 +126,7 @@ def evaluar_imagen(gt, pred, umbral_iou=0.5, campo=None):
             if M[i, j] >= umbral_iou:
 
                 # Dice del par, calculado con la intersección y las áreas que ya tenemos.
-                # Así no se recorre toda la imagen por cada célula (eso era lo que hacía lento el código)
+                # Así no se recorre toda la imagen por cada célula
                 dice_par = 2 * inter[i, j] / (area_g[i] + area_p[j])
 
                 # Guardar el par de células correctamente asociado
@@ -174,3 +174,74 @@ def evaluar_imagen(gt, pred, umbral_iou=0.5, campo=None):
         "Dice_pixel": metricas_globales["Dice"],
         "pares": pares
     }
+
+
+
+# 3. MAPA DE ETIQUETAS DEL GROUND TRUTH
+# Para comparar con evaluar_imagen necesitamos las células del GT en un mapa de etiquetas
+# (igual formato que el de la predicción), no como polígonos sueltos.
+
+def mapa_gt(img_shape, anotaciones, clases=None):
+    # Genera un mapa de etiquetas: 0 = fondo, k = k-ésima célula (rellena su polígono con k).
+    # Con 'clases' dibuja solo esas clases (ej: ["Parasitized"])
+
+    # Imagen vacía (todo fondo) del mismo alto y ancho que la imagen original
+    lab = np.zeros(img_shape[:2], np.int32)
+
+    # Recorrer las anotaciones; k empieza en 1 porque el 0 es el fondo
+    for k, a in enumerate(anotaciones, start=1):
+
+        # Dibujar la célula solo si no se filtró por clases o si su clase está en la lista.
+        # Se numera con k aunque no se dibuje, así el id de cada célula no depende del filtro
+        if clases is None or a["label"] in clases:
+
+            # Redondear los vértices a píxeles enteros y rellenar el polígono con el id k
+            cv2.fillPoly(lab, [np.round(a["polygon"]).astype(np.int32)], k)
+
+    return lab
+
+
+
+# 4. AGREGACIÓN DE RESULTADOS
+# evaluar_imagen da TP/FP/FN de UNA imagen. Para resultados por paciente, por método o
+# totales se suman los conteos y se recalculan las métricas (micro-promedio).
+# No se promedian los F1 de cada imagen: con pocas parasitadas por imagen serían muy ruidosos.
+
+def metricas(tabla):
+    # Recibe una tabla con columnas TP, FP y FN (una fila por imagen) y devuelve las métricas del conjunto
+
+    # Sumar los conteos de todas las filas
+    tp, fp, fn = tabla.TP.sum(), tabla.FP.sum(), tabla.FN.sum()
+
+    # Precisión y sensibilidad con las sumas (0 si el denominador es 0, para evitar dividir por cero)
+    p = tp / (tp + fp) if tp + fp else 0
+    s = tp / (tp + fn) if tp + fn else 0
+
+    # F1 con la precisión y la sensibilidad globales
+    return pd.Series({"TP": tp, "FP": fp, "FN": fn, "precision": p, "sensibilidad": s,
+                      "F1": 2 * p * s / (p + s) if p + s else 0})
+
+
+def resumen(tabla, por):
+    # Lo mismo que metricas, pero agrupando por una columna (estrategia, paciente, feature...)
+
+    # Sumar TP, FP y FN dentro de cada grupo
+    s = tabla.groupby(por)[["TP", "FP", "FN"]].sum()
+
+    # Métricas de cada grupo; fillna(0) cubre los grupos donde el denominador es 0 (queda NaN)
+    s["precision"] = (s.TP / (s.TP + s.FP)).fillna(0)
+    s["sensibilidad"] = (s.TP / (s.TP + s.FN)).fillna(0)
+
+    # F1 escrito en función de los conteos: 2·TP / (2·TP + FP + FN)
+    s["F1"] = (2 * s.TP / (2 * s.TP + s.FP + s.FN)).fillna(0)
+    return s
+
+
+def ponderado(d, col):
+    # Promedio de una métrica por imagen (IoU_medio_TP, Dice_medio_TP) ponderado por la cantidad de TP
+
+    # Descartar las imágenes sin TP: no tienen IoU/Dice (son NaN) y no deben contar como 0
+    d = d[d["TP"] > 0]
+
+    # Cada imagen pesa según cuántas células detectadas correctamente aportó
+    return np.average(d[col], weights=d["TP"]) if len(d) else np.nan

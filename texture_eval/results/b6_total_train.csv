@@ -1,0 +1,4 @@
+,TP,FP,FN,precision,sensibilidad,F1,IoU_medio,Dice_medio
+General + color,209.0,19.0,8.0,0.9167,0.9631,0.9393,0.9978,0.9988
+General + textura,192.0,17.0,25.0,0.9187,0.8848,0.9014,0.9961,0.9978
+General + color+textura,202.0,11.0,15.0,0.9484,0.9309,0.9395,0.9963,0.9979

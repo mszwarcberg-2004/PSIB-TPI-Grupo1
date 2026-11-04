@@ -1,0 +1,19 @@
+,paciente,TP,FP,FN,precision,sensibilidad,F1
+General + color,208C67P28N_ThinF,21,3,0,0.875,1.0,0.9333
+General + color,209C68P29N_ThinF,142,3,3,0.9793,0.9793,0.9793
+General + color,211C70P31_ThinF,36,1,1,0.973,0.973,0.973
+General + color,212C71P32_ThinF,5,5,0,0.5,1.0,0.6667
+General + color,263C115P76ThinF,1,7,4,0.125,0.2,0.1538
+General + color,282C134P95ThinF,4,0,0,1.0,1.0,1.0
+General + textura,208C67P28N_ThinF,20,2,1,0.9091,0.9524,0.9302
+General + textura,209C68P29N_ThinF,135,8,10,0.9441,0.931,0.9375
+General + textura,211C70P31_ThinF,30,1,7,0.9677,0.8108,0.8824
+General + textura,212C71P32_ThinF,4,1,1,0.8,0.8,0.8
+General + textura,263C115P76ThinF,0,5,5,0.0,0.0,0.0
+General + textura,282C134P95ThinF,3,0,1,1.0,0.75,0.8571
+General + color+textura,208C67P28N_ThinF,20,2,1,0.9091,0.9524,0.9302
+General + color+textura,209C68P29N_ThinF,142,3,3,0.9793,0.9793,0.9793
+General + color+textura,211C70P31_ThinF,34,1,3,0.9714,0.9189,0.9444
+General + color+textura,212C71P32_ThinF,5,2,0,0.7143,1.0,0.8333
+General + color+textura,263C115P76ThinF,0,3,5,0.0,0.0,0.0
+General + color+textura,282C134P95ThinF,1,0,3,1.0,0.25,0.4
