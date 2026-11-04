@@ -18,6 +18,7 @@
 #El método de clasificación NO se elige acá: lo elige el notebook B (sección 8) con train y lo guarda
 #en texture_eval/results/b_metodo_elegido.json. main.py solo lo lee y lo aplica.
  
+import cv2
 import numpy as np
 import pandas as pd
  
@@ -219,7 +220,10 @@ def main(split="train"):
  
     rutas = rutas_segmentacion(METODO)
     limpiar_resultados_anteriores(rutas)  #borra recortes, máscaras y CSV de la corrida anterior
- 
+    carpeta_parasitadas = rutas["csv"].parent / "parasitadas"  #salida final: una máscara y una imagen por cada foto
+    (carpeta_parasitadas / "mascaras").mkdir(parents=True, exist_ok=True)
+    (carpeta_parasitadas / "imagenes").mkdir(parents=True, exist_ok=True)
+
     celulas_total = []
     textura_total = []
     color_total = []
@@ -249,7 +253,16 @@ def main(split="train"):
         color_total.extend(resultado["color"])
         pred_color_total.update(resultado["pred_color"])
         pred_final_total.update(resultado["pred_final"])
- 
+
+        # Guardamos la salida final de cada imagen, en pred/otsu/parasitadas/:
+        # - mascaras/: máscara de eritrocitos parasitados completos (blanco = célula parasitada, negro = el resto)
+        # - imagenes/: la foto original mostrando solo las células parasitadas, con el resto en negro (no son recortes: es la foto entera)
+        nombre = imagen["image_id"].rsplit(".", 1)[0] + ".png"
+        mascara_inf = resultado["mascara_infectados"]
+        cv2.imwrite(str(carpeta_parasitadas / "mascaras" / nombre), mascara_inf.astype(np.uint8) * 255)
+        cv2.imwrite(str(carpeta_parasitadas / "imagenes" / nombre),
+                    cv2.cvtColor(imagen_rgb * mascara_inf[..., None].astype(np.uint8), cv2.COLOR_RGB2BGR))
+
         if split == "test":
             anot, _ = cargar_gt(imagen["patient_id"], imagen["image_id"])
             gt_par = gt_sin_borde(mapa_gt(imagen_rgb.shape, anot, clases=[CLASE_PARASITADA]), resultado["campo"])
@@ -316,16 +329,19 @@ def main(split="train"):
         a, b, c = g[["TP_cls", "FP_cls", "FN_cls"]].sum()
         f1_pacientes[pid] = prf(a, b, c)[2]
  
-    # Parasitemia global: parasitadas (método elegido) / total, sumando todas las imágenes
-    total_celulas = len(tabla_etiquetas)
-    total_par_pred = int(tabla_etiquetas["pred_final"].sum()) if total_celulas else 0
-    parasitemia_global = 100 * total_par_pred / total_celulas if total_celulas else 0.0
+    # Parasitemia: comparamos estimada y real de la misma forma, como promedio de las parasitemias de cada imagen
+    # (antes se comparaba la estimada global, que suma todas las células, con la real promediada por imagen: no eran comparables)
+    parasitemia_pred_media = tabla_metricas["parasitemia_pred"].mean()
+    parasitemia_gt_media = tabla_metricas["parasitemia_gt"].mean()
+    # Error por imagen: cuántos puntos porcentuales se aleja la estimada de la real en cada imagen, en promedio
+    error_parasitemia = (tabla_metricas["parasitemia_pred"] - tabla_metricas["parasitemia_gt"]).abs().mean()
  
     print(f"\nTotal: {len(celulas_total)} células -> {rutas['csv']}")
     print(f"Textura: {len(textura_total)} células -> {ruta_textura}")
     print(f"Color: {len(color_total)} células -> {ruta_color}")
     print(f"Métricas por imagen -> {ruta_metricas}")
     print(f"Clase del GT de cada célula -> {ruta_etiquetas}")
+    print(f"Células parasitadas (mascaras/ e imagenes/, una por foto) -> {carpeta_parasitadas}")
     print(f"\nSEGMENTACIÓN ({split.upper()}): IoU {tabla_metricas['IoU'].mean():.4f} | Dice {tabla_metricas['Dice'].mean():.4f}")
     print(f"DETECCIÓN DE CÉLULAS ({split.upper()}): TP {tp} | FP {fp} | FN {fn} | "
           f"Precisión {precision:.4f} | Sensibilidad {sensibilidad:.4f} | F1 {f1:.4f}")
@@ -336,8 +352,8 @@ def main(split="train"):
     print(f"CLASIFICACIÓN, regla C5 sola, referencia ({split.upper()}): TP {tp5} | FP {fp5} | FN {fn5} | "
           f"Precisión {prec_5:.4f} | Sensibilidad {sens_5:.4f} | F1 {f1_5:.4f}")
     print("F1 por paciente: " + " | ".join(f"{pid} {v:.3f}" for pid, v in f1_pacientes.items()))
-    print(f"PARASITEMIA ({split.upper()}): estimada {parasitemia_global:.2f}% | "
-          f"GT promedio por imagen {tabla_metricas['parasitemia_gt'].mean():.2f}%")
+    print(f"PARASITEMIA ({split.upper()}, promedio por imagen): estimada {parasitemia_pred_media:.2f}% | "
+          f"GT {parasitemia_gt_media:.2f}% | error medio por imagen {error_parasitemia:.2f} puntos")
  
  
 if __name__ == "__main__":
