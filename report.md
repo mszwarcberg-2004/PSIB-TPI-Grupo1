@@ -41,6 +41,16 @@ Imagen RGB
 
 **Estrategia elegida:** primero segmentar **todos** los eritrocitos y después clasificar cada uno. Así se separa el problema de *encontrar* las células del de *decidir si están infectadas*, y la parasitemia se calcula directamente (parasitadas / total).
 
+**Tres formas de usar el mismo pipeline.** Las tres llaman a `procesar_imagen` de `main.py`, que **no usa el GT** y aplica los parámetros fijos elegidos con train:
+
+| Uso | Comando | Para qué |
+|---|---|---|
+| Desarrollo (train) | `python main.py` | Procesa train y lo **evalúa contra el GT**. Con esto se eligieron todos los parámetros. |
+| Evaluación final (test) | `main("test")` con `EVALUACION_FINAL = True` | Una única vez, con todo fijo. Resultados en `pred/resultados_test/`. |
+| **Casos incógnita** | `python predecir.py <imagen o carpeta>` | Imágenes nuevas **sin GT** (las que traiga la cátedra). Devuelve la parasitemia, la máscara de parasitadas y una imagen con cada célula marcada (rojo = parasitada, verde = sana). Resultados en `pred/incognita/`. |
+
+`predecir.py` se comprobó con imágenes de train tratadas como incógnitas: da exactamente la misma parasitemia que `main.py` para esas imágenes.
+
 ## 3. Preprocesamiento (Bloque A y C)
 
 | Paso | Valor | Criterio | Archivo |
@@ -135,6 +145,16 @@ Los tres están en una zona estable. Solo empeora la apertura 3, que deja pasar 
 - **Criterio:** grilla en train (mínimo de 0,3 a 0,8 y máximo de 1,4 a 2,2) con validación dejando un paciente afuera. **Las 6 vueltas eligieron 0,6 – 2,0.** Alrededor de ese valor el F1 casi no cambia: con 0,5–0,6 de mínimo y 1,8–2,2 de máximo da 0,945–0,946; con un mínimo de 0,8 baja a 0,905.
 - **Borde:** se descartan las células que tocan una franja de 3 px del borde del círculo, porque están cortadas. En la evaluación también se sacan del GT, para no contarlas como errores.
 
+## Cómo se eligieron los atributos de textura y color (secciones 9 a 11)
+
+Los Bloques B y C siguieron los mismos pasos, **solo con train**:
+1. Calcular **todos** los atributos de cada célula (15 de textura y 47 de color).
+2. **Ranking:** AUC de cada atributo para separar parasitadas de sanas.
+3. **Selección:** quedarse con los mejores, sin atributos redundantes (muy correlacionados entre sí).
+4. Armar una **regla de decisión** y validarla dejando un paciente afuera (LOPO).
+
+Primero se hizo con las células **del GT** (contornos perfectos, para explorar). Después se repitió con **las células que segmenta el pipeline** (notebook C7 para color y sección 8 de `b_textura_evaluacion2` para textura), porque son las que recibe el clasificador. La **combinación final** de color y textura se eligió en la sección 8 de `b_textura_evaluacion2`.
+
 ## 9. Textura: GLCM (Bloque B)
 
 - Se calcula sobre el **canal G del recorte**, con **32 niveles de gris**, a **distancias 1, 2 y 3 px** y **4 ángulos promediados** (así no depende de la orientación). Solo cuentan los pares de píxeles dentro de la célula.
@@ -142,12 +162,25 @@ Los tres están en una zona estable. Solo empeora la apertura 3, que deja pasar 
 - **Selección, sobre las células segmentadas de train:**
   - ranking por AUC, con el estadístico U de Mann-Whitney y su p-valor;
   - se descartan los redundantes (|Spearman| ≥ 0,9) y los que separan poco (< 0,6).
-  - **Elegidos:** `contrast_d3` (AUC 0,984, p ≈ 10⁻¹¹²), `entropy_d2` (0,914) y `correlation_d1` (0,884).
+  - **Ranking:** `contrast_d3` 0,984 · `contrast_d2` 0,981 · `homogeneity_d2` 0,935 (menor en parasitadas) · `entropy_d2` 0,914 · `correlation_d1` 0,884 · `energy_d1` 0,866 (menor en parasitadas).
+  - **Elegidos:** `contrast_d3` (AUC 0,984, p ≈ 10⁻¹¹²), `entropy_d2` (0,914) y `correlation_d1` (0,884). Las otras distancias del contraste y la homogeneidad quedaron afuera por redundantes: miden casi lo mismo que `contrast_d3`.
 - **Por qué el contraste:** el parásito es una mancha oscura dentro de un citoplasma claro y uniforme, y eso aumenta las diferencias de gris entre píxeles vecinos. El tamaño de la célula **no** separa las clases (AUC 0,52), así que lo que separa es la textura, no el tamaño.
 
 ## 10. Color (Bloque C)
 
 - Se calculan **47 atributos de color por célula** (C4) sobre el recorte **normalizado por el fondo**: media, desvío y mediana de G, L, a, b y S; percentiles; fracción de píxeles oscuros o violetas; histogramas; y las manchas de C3.
+- **Ranking de los atributos de color (C4, AUC promedio por paciente, train):**
+
+| Atributo | Qué mide | AUC |
+|---|---|---:|
+| `b_rel_p1` | qué tan violeta es lo más violeta de la célula, respecto de su propia mediana | 0,974 |
+| `contraste_G_mancha` | qué tan oscura es la mancha respecto del resto de la célula | 0,961 |
+| `n_manchas` | cantidad de manchas oscuras (máscara de C3) | 0,958 |
+| `a_desvio` | cuánto varía el canal a dentro de la célula | 0,957 |
+| Medias de color (G, L, a, b, S) | color promedio de la célula | 0,69 – 0,81 |
+
+  **Conclusión:** lo que separa **no es el color promedio**, sino **lo local**: un punto más oscuro o más violeta que el resto de la misma célula. El parásito no cambia el color de toda la célula, le agrega una mancha. Por eso los desvíos separan mucho mejor que las medias.
+  **Seleccionados** (sin redundancia, |ρ| < 0,8): `b_rel_p1`, `contraste_G_mancha`, `a_desvio`, `G_hist_0`, `frac_violeta`, `b_desvio`, `b_hist_2` y `a_p95`.
 - **Máscara de manchas oscuras (C3):** dentro de la célula, achicada 5 px para ignorar el borde, se marcan los píxeles con **G al menos 39 niveles por debajo de la mediana de G de esa célula**. Se cuenta una mancha si tiene **al menos 50 px**. Es relativa a cada célula, así que no depende de la tinción. Los parámetros se eligieron en C3 con validación por paciente, en train.
 - **Criterio de color (C5): "parasitada si tiene al menos una mancha"** (`n_manchas ≥ 1`). Se comparó con 8 reglas de umbrales (1 atributo, AND, OR o mayoría de 3; Youden o máximo F1) con LOPO:
 
@@ -161,13 +194,51 @@ Los tres están en una zona estable. Solo empeora la apertura 3, que deja pasar 
   - es **más estable entre pacientes**;
   - es **simple y explicable**: "hay una mancha oscura dentro del eritrocito".
 - **Sobre las células segmentadas (C7):** los atributos de color siguen separando las clases. El AUC cambia ±0,02 respecto de las células del GT.
+- **Por qué la regla de color no es simplemente el mejor atributo (`b_rel_p1`):** como regla de un solo umbral, sobre las células segmentadas dio F1 0,740 (LOPO). "Tiene mancha" dio 0,820 y detecta más parasitadas.
 
 ## 11. Clasificación final: color Y textura (Bloque B + C)
 
 **Regla final: una célula es parasitada si tiene al menos una mancha oscura (color, C5) Y `contrast_d3` ≥ 0,709 (textura).**
 
-- El umbral de textura es el que **maximiza F1** en las células segmentadas de train.
-- Está guardado en `texture_eval/results/b_metodo_elegido.json`; `main.py` solo lo lee y lo aplica, no recalcula nada.
+### 11.1. Explicado en simple
+
+**¿Cómo se ve un eritrocito parasitado?** La tinción de Giemsa pinta el parásito de violeta oscuro. Al microscopio, un eritrocito infectado es una **célula rosada clara con un puntito oscuro adentro**; uno sano es **rosado parejo**. Las dos reglas buscan ese puntito, cada una desde un ángulo distinto.
+
+**Regla de color: "tiene mancha".** Para cada célula:
+1. Se calcula el **verde típico de esa célula** (la mediana de G). Oscuro = verde bajo.
+2. Se marcan los píxeles **mucho más oscuros que lo típico de esa misma célula**: al menos 39 niveles menos.
+3. Si esos píxeles forman una zona de **al menos 50 píxeles**, es una **mancha**. Las zonas más chicas son ruido y se ignoran.
+4. Se ignoran los 5 píxeles del borde de la célula, que suele ser más oscuro y daría falsas manchas.
+
+```
+Célula sana:              Célula parasitada:
+  ░░░░░░░                   ░░░░░░░
+ ░░░░░░░░░                 ░░░░██░░░   ← mancha oscura (parásito)
+ ░░░░░░░░░                 ░░░░██░░░
+  ░░░░░░░                   ░░░░░░░
+ 0 manchas → no            1 mancha → sí (según color)
+```
+
+La comparación es **contra la misma célula**, no contra un valor fijo. Así funciona aunque una imagen esté más teñida que otra.
+
+**Regla de textura: "contraste alto".**
+- El **contraste GLCM** mide qué tan distintos son los grises de píxeles vecinos, a 3 píxeles de distancia (`contrast_d3`). Es un atributo **de textura**, no de color.
+- Una célula sana es pareja, así que su contraste es bajo. Una parasitada tiene la mancha oscura al lado del citoplasma claro, así que su contraste es alto.
+- Se probaron **los 15 atributos de textura** (5 medidas × 3 distancias) y **`contrast_d3` fue el que mejor separa** (AUC 0,984).
+- Combinar varios atributos de textura (regresión logística con los 3 seleccionados) no lo superó: F1 0,838 contra 0,852.
+
+**¿Por qué pedir las dos?** El color ve **el puntito oscuro** y la textura ve **que la célula dejó de ser pareja**. Pedir las dos a la vez evita marcar células que tienen una sola de las señales por otra causa, por ejemplo un resto de tinción o una superposición. Por eso los falsos positivos bajan a menos de la mitad.
+
+### 11.2. Cómo se eligieron los umbrales (y dónde entra el GT)
+
+1. `main.py` segmenta las imágenes de **train** y calcula los atributos de cada célula detectada. Por ejemplo, una célula tiene contraste 0,85 y otra 0,40.
+2. Cada célula detectada se empareja con **su célula del GT** (IoU ≥ 0,5) y se le copia la clase: parasitada o sana (`clase_gt` en `etiquetas_train.csv`). **El GT solo aporta la respuesta correcta**; los atributos son siempre de nuestras células segmentadas.
+3. Se prueban muchos umbrales posibles (contraste ≥ 0,5, ≥ 0,6, ≥ 0,7…). Para cada uno se cuentan los aciertos contra `clase_gt` y **se elige el que maximiza F1**. Así salió 0,709.
+4. El umbral **queda fijo** en `b_metodo_elegido.json`. En una imagen nueva (test o un caso incógnita) se aplica tal cual, **sin mirar el GT**.
+
+Es como estudiar con ejercicios que tienen las respuestas (train) para aprender el criterio, y después rendir el examen (test) sin las respuestas. Los parámetros de la mancha (39 niveles, 50 píxeles, 5 píxeles de borde) se eligieron de la misma forma en C3, con validación dejando un paciente afuera.
+
+### 11.3. Comparación de estrategias
 
 **Criterio de elección:** se compararon 10 estrategias con **LOPO sobre las células segmentadas de train** (las que ve el pipeline real):
 
@@ -250,7 +321,8 @@ F1 de la clasificación por paciente: 208 → 0,88 · 209 → 0,89 · 211 → 0,
 | Compresión y descompresión | Experimento JPEG, notebook C6 (sección 13) |
 | Segmentación | Otsu, K-means y GMM; morfología; Watershed (secciones 4 a 8) |
 | Análisis de texturas | GLCM (sección 9) |
-| Resultados: visualización, estadística, comparaciones, significancia | Imágenes de parasitadas; AUC con p-valores de Mann-Whitney e intervalo de confianza por bootstrap; LOPO; tablas de sensibilidad; comparación de métodos (secciones 11 a 15) |
+| Resultados: visualización, estadística, comparaciones, significancia | Imágenes de parasitadas y de contornos (rojo = parasitada, verde = sana); AUC con p-valores de Mann-Whitney e intervalo de confianza por bootstrap; LOPO; tablas de sensibilidad; comparación de métodos (secciones 11 a 15) |
+| Entrega del modelo, evaluado por la cátedra con casos incógnita | `predecir.py`: aplica el pipeline a imágenes nuevas sin GT (sección 2) |
 
 ## 18. Bibliografía
 
