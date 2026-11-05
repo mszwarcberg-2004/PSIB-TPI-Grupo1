@@ -18,6 +18,49 @@ Los resultados se comparan con las anotaciones del Ground Truth (GT) del dataset
 | B - Textura y evaluación | `texture_eval/` | GLCM, selección de atributos, umbrales, elección del clasificador y métricas de evaluación. |
 | C - Color | `color_stain/` | Normalización de color, glóbulos blancos, atributos de color, criterio de color, parasitemia, máscara de infectados y compresión JPEG. |
 
+## Guía rápida: qué correr para ver los resultados
+
+Primero hay que instalar las dependencias (sección 2). Después, **desde la carpeta principal del repositorio** y con el entorno activado, copiar y pegar en la terminal **en este orden**.
+
+Los resultados no están en GitHub: se generan al correr estos comandos.
+
+**1. Resultados de train** (12 imágenes, unos 1,5 minutos). Imprime el resumen de métricas al final:
+
+```bash
+python main.py
+```
+
+**2. Figuras de train.** Abre una figura por paciente; **al cerrar la ventana aparece la del siguiente** (6 en total):
+
+```bash
+python figuras.py train
+```
+
+**3. Resultados de test** (4 imágenes de los 2 pacientes de test). Imprime el resumen de métricas al final:
+
+```bash
+python -c "import main; main.EVALUACION_FINAL = True; main.main('test')"
+```
+
+> `main.py` tiene un control (`EVALUACION_FINAL = False`) para que test no se corra por error durante el desarrollo. Este comando lo habilita **solo para esta ejecución**, sin modificar el archivo. Los resultados quedan en `data/shared/pred/resultados_test/` y no pisan los de train.
+
+**4. Figuras de test.** Dos figuras, una por paciente; al cerrar la primera aparece la segunda:
+
+```bash
+python figuras.py test
+```
+
+**5. Casos incógnita** (imágenes nuevas, sin GT). Reemplazar `ruta/a/imagen.jpg` por la imagen o por una carpeta con imágenes:
+
+```bash
+python predecir.py ruta/a/imagen.jpg
+```
+```bash
+python figuras.py incognita ruta/a/imagen.jpg
+```
+
+El detalle de cada comando está en la sección 3, y lo que guarda cada uno, en la sección 5.
+
 ## 1. Dataset
 
 **NIH-NLM-ThinBloodSmearsPf, Polygon Set.** JPG RGB de 5312 × 2988 píxeles. Cada imagen tiene un archivo GT (`.txt`) con el polígono y la clase de cada célula: `Parasitized`, `Uninfected` o `White_Blood_Cell`.
@@ -75,13 +118,19 @@ python main.py
 
 Corre todo sobre las 12 imágenes de **train** (unos 1,5 minutos): segmentación, textura, color, clasificación, parasitemia y **evaluación contra el GT**. Al final imprime un resumen con todas las métricas.
 
-**Test** se corre una sola vez, al final del trabajo. Hay que poner `EVALUACION_FINAL = True` en `main.py` y ejecutar `main("test")`. Los resultados de test quedan aparte, en `data/shared/pred/resultados_test/`.
+**Test** se corrió una sola vez, al final del trabajo, con todo fijo. Para reproducirlo:
+
+```bash
+python -c "import main; main.EVALUACION_FINAL = True; main.main('test')"
+```
+
+Habilita test solo para esa ejecución, sin modificar `main.py`. Los resultados de test quedan aparte, en `data/shared/pred/resultados_test/`.
 
 ### 3.3. Figuras de resultados
 
 ```bash
 python figuras.py train                        # los 6 pacientes de train (después de python main.py)
-python figuras.py test                         # los 2 pacientes de test (después de main("test"))
+python figuras.py test                         # los 2 pacientes de test (después de correr test, sección 3.2)
 python figuras.py incognita ruta/imagen.jpg    # imágenes ya procesadas con predecir.py (o una carpeta)
 ```
 
