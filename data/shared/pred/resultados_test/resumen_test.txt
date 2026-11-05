@@ -1,0 +1,26 @@
+Método de clasificación: C5 AND textura (F1 LOPO en train: 0.8564)
+Imágenes a procesar: 4 | split: test | método de segmentación: otsu
+IMG_20150820_162300.jpg: 196 células detectadas | IoU 0.822 | TP 187 FP 9 FN 26 | parasitemia 3.6% (GT 3.8%)
+IMG_20150820_162504.jpg: 193 células detectadas | IoU 0.810 | TP 188 FP 5 FN 16 | parasitemia 6.2% (GT 7.4%)
+IMG_20151106_105834.jpg: 293 células detectadas | IoU 0.824 | TP 290 FP 3 FN 5 | parasitemia 1.4% (GT 0.0%)
+IMG_20151106_110230.jpg: 276 células detectadas | IoU 0.829 | TP 270 FP 6 FN 2 | parasitemia 0.7% (GT 0.0%)
+                  TP    FP   FN  ...     F1  IoU_medio  Dice_medio
+C5 AND textura  17.0   8.0  6.0  ...  0.708      0.891       0.940
+C5 sola         20.0  20.0  3.0  ...  0.635      0.884       0.936
+
+[2 rows x 8 columns]
+
+Total: 958 células -> /Users/milenaszwarcberg/Documents/ITBA/2026 2C/PSIB/PSIB-TPI-Grupo1/data/shared/pred/resultados_test/cells_pred.csv
+Textura: 958 células -> /Users/milenaszwarcberg/Documents/ITBA/2026 2C/PSIB/PSIB-TPI-Grupo1/data/shared/pred/resultados_test/features_texture_otsu_test.csv
+Color: 958 células -> /Users/milenaszwarcberg/Documents/ITBA/2026 2C/PSIB/PSIB-TPI-Grupo1/data/shared/pred/resultados_test/features_color_otsu_test.csv
+Métricas por imagen -> /Users/milenaszwarcberg/Documents/ITBA/2026 2C/PSIB/PSIB-TPI-Grupo1/data/shared/pred/resultados_test/metricas_test.csv
+Clase del GT de cada célula -> /Users/milenaszwarcberg/Documents/ITBA/2026 2C/PSIB/PSIB-TPI-Grupo1/data/shared/pred/resultados_test/etiquetas_test.csv
+Células parasitadas (mascaras/ e imagenes/, una por foto) -> /Users/milenaszwarcberg/Documents/ITBA/2026 2C/PSIB/PSIB-TPI-Grupo1/data/shared/pred/resultados_test/parasitadas
+
+SEGMENTACIÓN (TEST): IoU 0.8213 | Dice 0.9019
+DETECCIÓN DE CÉLULAS (TEST): TP 935 | FP 23 | FN 49 | Precisión 0.9760 | Sensibilidad 0.9502 | F1 0.9629
+CLASE DEL GT DE LAS CÉLULAS DETECTADAS: Uninfected 915 | sin_pareja 23 | Parasitized 20
+CLASIFICACIÓN, C5 AND textura (TEST): TP 17 | FP 6 | FN 3 | Precisión 0.7391 | Sensibilidad 0.8500 | F1 0.7907
+CLASIFICACIÓN, regla C5 sola, referencia (TEST): TP 20 | FP 18 | FN 0 | Precisión 0.5263 | Sensibilidad 1.0000 | F1 0.6897
+F1 por paciente: 231C89P50ThinF 0.919 | 305C212ThinF 0.000
+PARASITEMIA (TEST, promedio por imagen): estimada 2.97% | GT 2.78% | error medio por imagen 0.85 puntos

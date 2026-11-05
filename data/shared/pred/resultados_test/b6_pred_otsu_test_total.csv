@@ -1,0 +1,3 @@
+,TP,FP,FN,precision,sensibilidad,F1,IoU_medio,Dice_medio
+C5 AND textura,17.0,8.0,6.0,0.68,0.7391,0.7083,0.8907,0.9403
+C5 sola,20.0,20.0,3.0,0.5,0.8696,0.6349,0.8838,0.9364
