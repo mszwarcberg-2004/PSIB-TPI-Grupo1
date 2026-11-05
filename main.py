@@ -273,14 +273,24 @@ def main(split="train"):
         cv2.imwrite(str(carpeta_parasitadas / "imagenes" / nombre),
                     cv2.cvtColor(imagen_rgb * mascara_inf[..., None].astype(np.uint8), cv2.COLOR_RGB2BGR))
 
+        # GT solo con las parasitadas (sin las del borde): se usa para la detección final, en train y en test
+        anot, _ = cargar_gt(imagen["patient_id"], imagen["image_id"])
+        gt_par = gt_sin_borde(mapa_gt(imagen_rgb.shape, anot, clases=[CLASE_PARASITADA]), resultado["campo"])
+
         if split == "test":
-            anot, _ = cargar_gt(imagen["patient_id"], imagen["image_id"])
-            gt_par = gt_sin_borde(mapa_gt(imagen_rgb.shape, anot, clases=[CLASE_PARASITADA]), resultado["campo"])
             guardados.append({"patient_id": imagen["patient_id"], "image_id": imagen["image_id"],
                               "celulas": resultado["celulas"], "campo": resultado["campo"],
                               "etiquetas": resultado["etiquetas"].astype(np.int16), "gt": gt_par.astype(np.int16)})
  
         metricas, etiquetas_celulas = evaluar_contra_gt(imagen_rgb, resultado, imagen["patient_id"], imagen["image_id"])
+
+        # Detección final de células parasitadas (de punta a punta): solo las células marcadas como parasitadas
+        # contra las parasitadas del GT (IoU >= 0.5). Es la misma cuenta que hace clf.evaluar_test en test.
+        ids_marcadas = [k for k, f in enumerate(resultado["celulas"], start=1) if resultado["pred_final"][f["cell_id"]]]
+        pred_par = np.where(np.isin(resultado["etiquetas"], ids_marcadas), resultado["etiquetas"], 0)
+        final = evaluar_imagen(gt_par, pred_par, campo=resultado["campo"])
+        metricas["TP_final"], metricas["FP_final"], metricas["FN_final"] = final["TP"], final["FP"], final["FN"]
+
         metricas_total.append(metricas)
         etiquetas_total.extend(etiquetas_celulas)
  
@@ -319,15 +329,21 @@ def main(split="train"):
             decision["metodo"]: {c for c, v in pred_final_total.items() if v},
             "C5 sola": {c for c, v in pred_color_total.items() if v},
         }
-        print(clf.evaluar_test(guardados, marcadas, METODO, carpeta=carpeta_test).round(3))  #guarda sus CSV en resultados_test/
+        clf.evaluar_test(guardados, marcadas, METODO, carpeta=carpeta_test)  #guarda sus CSV en resultados_test/ (el resultado se imprime abajo, en "Detección final")
  
     # Resumen de detección: IoU y Dice se promedian por imagen; TP, FP y FN se suman (cada célula pesa lo mismo)
     tp, fp, fn = tabla_metricas[["TP", "FP", "FN"]].sum()
     precision, sensibilidad, f1 = prf(tp, fp, fn)
  
     # Resumen de clasificación con el método elegido (sobre células con pareja en el GT)
-    tpc, fpc, fnc = tabla_metricas[["TP_cls", "FP_cls", "FN_cls"]].sum()
+    tpc, fpc, fnc, tnc = tabla_metricas[["TP_cls", "FP_cls", "FN_cls", "TN_cls"]].sum()
     prec_c, sens_c, f1_c = prf(tpc, fpc, fnc)
+    especificidad_c = tnc / (tnc + fpc) if (tnc + fpc) else 0.0  #de las sanas, cuántas se clasificaron como sanas
+
+    # Detección final de células parasitadas (de punta a punta). Suma los errores de la segmentación y de la clasificación:
+    # FP = sanas marcadas y objetos que no son ninguna parasitada; FN = parasitadas no detectadas o clasificadas como sanas
+    tpf, fpf, fnf = tabla_metricas[["TP_final", "FP_final", "FN_final"]].sum()
+    prec_f, sens_f, f1_f = prf(tpf, fpf, fnf)
  
     # Referencia: regla de C5 sola, con las mismas células
     tp5, fp5, fn5 = tabla_metricas[["TP_c5", "FP_c5", "FN_c5"]].sum()
@@ -352,23 +368,28 @@ def main(split="train"):
     print(f"Métricas por imagen -> {ruta_metricas}")
     print(f"Clase del GT de cada célula -> {ruta_etiquetas}")
     print(f"Células parasitadas (mascaras/ e imagenes/, una por foto) -> {carpeta_parasitadas}")
-    print(f"\nSEGMENTACIÓN ({split.upper()}): IoU {tabla_metricas['IoU'].mean():.4f} | Dice {tabla_metricas['Dice'].mean():.4f}")
-    print(f"DETECCIÓN DE CÉLULAS ({split.upper()}): TP {tp} | FP {fp} | FN {fn} | "
-          f"Precisión {precision:.4f} | Sensibilidad {sensibilidad:.4f} | F1 {f1:.4f}")
+    # Resumen global, una etapa por renglón (todas las imágenes juntas)
     conteo = tabla_etiquetas["clase_gt"].value_counts()
-    print(f"CLASE DEL GT DE LAS CÉLULAS DETECTADAS: " + " | ".join(f"{clase} {n}" for clase, n in conteo.items()))
-    print(f"CLASIFICACIÓN, {decision['metodo']} ({split.upper()}): TP {tpc} | FP {fpc} | FN {fnc} | "
-          f"Precisión {prec_c:.4f} | Sensibilidad {sens_c:.4f} | F1 {f1_c:.4f}")
-    print(f"CLASIFICACIÓN, regla C5 sola, referencia ({split.upper()}): TP {tp5} | FP {fp5} | FN {fn5} | "
-          f"Precisión {prec_5:.4f} | Sensibilidad {sens_5:.4f} | F1 {f1_5:.4f}")
-    print("F1 por paciente: " + " | ".join(f"{pid} {v:.3f}" for pid, v in f1_pacientes.items()))
-    print(f"PARASITEMIA ({split.upper()}, promedio por imagen): estimada {parasitemia_pred_media:.2f}% | "
-          f"GT {parasitemia_gt_media:.2f}% | error medio por imagen {error_parasitemia:.2f} puntos")
+    print(f"\nRESULTADOS GLOBALES ({split.upper()}, {len(tabla_metricas)} imágenes) - clasificación: {decision['metodo']}")
+    print(f"1. Segmentación (píxeles de eritrocito): IoU {tabla_metricas['IoU'].mean():.3f} | Dice {tabla_metricas['Dice'].mean():.3f}")
+    print(f"2. Detección de eritrocitos individuales: {len(celulas_total)} detectados | TP {tp} | FP {fp} | FN {fn} | "
+          f"Precisión {precision:.3f} | Sensibilidad {sensibilidad:.3f} | F1 {f1:.3f}")
+    print(f"3. Clasificación (células bien detectadas: {conteo.get(CLASE_PARASITADA, 0)} parasitadas y {conteo.get('Uninfected', 0)} sanas): "
+          f"TP {tpc} | FP {fpc} | FN {fnc} | Precisión {prec_c:.3f} | Sensibilidad {sens_c:.3f} | "
+          f"Especificidad {especificidad_c:.3f} | F1 {f1_c:.3f}")
+    print(f"4. Detección final de células parasitadas ({tpf + fnf} parasitadas en el GT, {tpf + fpf} marcadas): "
+          f"TP {tpf} | FP {fpf} | FN {fnf} | Precisión {prec_f:.3f} | Sensibilidad {sens_f:.3f} | F1 {f1_f:.3f}")
+    print(f"5. Parasitemia (promedio por imagen): estimada {parasitemia_pred_media:.2f}% | real {parasitemia_gt_media:.2f}% | "
+          f"error medio por imagen {error_parasitemia:.2f} puntos")
+
+    # Referencias, para comparar (no son el resultado principal)
+    print(f"\nReferencia - clasificación con la regla de color C5 sola: TP {tp5} | FP {fp5} | FN {fn5} | "
+          f"Precisión {prec_5:.3f} | Sensibilidad {sens_5:.3f} | F1 {f1_5:.3f}")
+    print("Referencia - F1 de clasificación por paciente: " + " | ".join(f"{pid} {v:.3f}" for pid, v in f1_pacientes.items()))
  
  
 if __name__ == "__main__":
     main("train")
  
  
-#PENDIENTE:
-#- Cuando todo esté fijo: EVALUACION_FINAL = True y main("test") una sola vez, sin tocar nada después.
+#test ya se corrió (tag evaluacion-final

@@ -116,7 +116,7 @@ python predecir.py ruta/a/carpeta/ --salida otra/carpeta
 python main.py
 ```
 
-Corre todo sobre las 12 imágenes de **train** (unos 1,5 minutos): segmentación, textura, color, clasificación, parasitemia y **evaluación contra el GT**. Al final imprime un resumen con todas las métricas.
+Corre todo sobre las 12 imágenes de **train** (unos 1,5 minutos): segmentación, textura, color, clasificación, parasitemia y **evaluación contra el GT**. Al final imprime los resultados globales, una etapa por renglón: 1) segmentación, 2) detección de eritrocitos individuales, 3) clasificación, 4) detección final de células parasitadas y 5) parasitemia.
 
 **Test** se corrió una sola vez, al final del trabajo, con todo fijo. Para reproducirlo:
 
@@ -259,7 +259,7 @@ data/shared/
 | `rules_classifier.py` | Reglas y regresión logística para color, textura y su combinación, con validación dejando un paciente afuera. |
 | `stats_analysis.py` | Gráficos y estadística: boxplots, correlaciones, curvas ROC e intervalo de confianza del AUC (bootstrap). |
 | `clasificacion_pred.py` | Aplica el método elegido (`b_metodo_elegido.json`) a cada célula (`decidir`) y hace la evaluación final de test (`evaluar_test`). |
-| `seg_metrics.py` | IoU y Dice, y emparejamiento célula a célula con el GT (algoritmo húngaro, IoU ≥ 0,5). |
+| `seg_metrics.py` | IoU y Dice, y emparejamiento uno a uno con el GT (IoU ≥ 0,5). |
 | `notebooks/b_textura_evaluacion2.ipynb` | Análisis de textura: GLCM, ranking y selección, umbrales con ROC, estrategias color + textura y **elección del método final** (sección 8, sobre las células segmentadas). |
 | `results/b_metodo_elegido.json` | **Método final y umbral de textura** (`contrast_d3` ≥ 0,709). Lo lee `main.py`. |
 | `results/b2_ranking_atributos.csv` / `_seg.csv` | AUC y p-valor de cada atributo de textura, sobre las células del GT / sobre las segmentadas. |

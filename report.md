@@ -75,7 +75,14 @@ No vuelve a correr el pipeline. La función de contornos está una sola vez, en 
 | Corrección de iluminación | **descartada** | Empeoró (IoU 0,803 → 0,775). | — |
 | Normalización de color por el fondo | fondo de referencia de train: RGB (220, 181, 166) | Cada canal se multiplica para que el fondo quede igual a la referencia (balance de blancos). **No se usa para segmentar** (Otsu ya calcula el umbral en cada imagen; en C2 ni el balance de blancos ni Reinhard mejoraron la segmentación), **sí para color y glóbulos blancos**, que usan umbrales fijos. La referencia es el promedio del fondo de las 12 imágenes de train y se usa igual para test y casos incógnita. | `color_stain/normalizacion.py`; referencia en `color_stain/results/referencia_fondo.json` |
 
-**Los recortes se toman de la imagen original**, no de la preprocesada, para que la textura y el color usen las intensidades reales.
+**El preprocesamiento es solo para segmentar; color y textura se miden sobre la imagen original.**
+- CLAHE y el gaussiano se aplican a una copia del canal G y se usan **solo para obtener la máscara** de Otsu.
+- Con la máscara de cada célula se recorta la **imagen RGB original**, con el fondo en negro. Sobre ese recorte se calculan la textura (canal G) y el color.
+- **Por qué no se mide sobre la imagen preprocesada:**
+  - **CLAHE** cambia los grises **de forma distinta en cada zona** de la imagen (ecualiza por cuadros de una grilla 8×8) y **solo en el canal verde**. Dos células iguales podrían dar valores distintos según dónde estén, y el color quedaría deformado.
+  - **El gaussiano** es un pasa bajos: borra los cambios bruscos entre píxeles vecinos, que es justo lo que mide el contraste GLCM y lo que hace visible al parásito (un punto oscuro chico).
+- **El color sí tiene una corrección propia:** la normalización por el fondo. Es **global y pareja** (cada canal se multiplica por un mismo número en toda la imagen), así que corrige la iluminación sin deformar la relación entre píxeles ni entre células.
+- **Coherencia:** los atributos, el ranking por AUC y los umbrales se eligieron con estos recortes originales.
 
 **Comparación de configuraciones** (IoU promedio en train, `segmentation/comparar_otsu.py`):
 
@@ -131,7 +138,10 @@ Los tres están en una zona estable. Solo empeora la apertura 3, que deja pasar 
 ## 6. Separación de células pegadas: Watershed (Bloque A)
 
 - **Problema:** sin Watershed, cada región blanca conectada (conectividad 8) se toma como una célula, así que dos eritrocitos que se tocan quedan como un solo objeto. Ese objeto es demasiado grande y el filtro de área lo descarta, o se acepta pero no coincide con ninguna célula del GT. Así se perdía alrededor de la mitad de las células (sensibilidad 0,49).
-- **Método:**
+- **Etiquetado en dos pasos:**
+  1. **Etiquetado de componentes conectadas (*merge labeling*, conectividad 8)** (`label` de scikit-image): le da un número a cada región conectada de la máscara. Recorre la imagen en dos pasadas: en la primera pone etiquetas provisorias y anota cuáles son equivalentes, y en la segunda las unifica. Conectividad 8 (vecinos por lado o por diagonal) para que un contorno fino en diagonal no parta una célula en pedazos. Las células pegadas quedan con el mismo número, así que en el pipeline final este paso **solo sirve para que Watershed busque al menos un centro dentro de cada objeto**.
+  2. **Watershed hace el etiquetado final:** cada eritrocito queda con su propia etiqueta, aunque esté pegado a otro. Todo lo que sigue (filtro de área, recortes, máscaras, textura, color y evaluación) usa estas etiquetas.
+- **Método de Watershed:**
   1. Transformada de distancia: es máxima en el centro de cada célula.
   2. Máximos locales: son los marcadores, uno por célula.
   3. Inundación desde cada marcador: el límite entre dos células queda en la "cintura" donde se tocan.
@@ -323,12 +333,15 @@ Cada imagen de train se recomprimió con calidades 95 a 10 y se descomprimió. D
 | Qué | Métrica | Detalle |
 |---|---|---|
 | Segmentación (píxeles) | IoU y Dice | Máscara contra GT de eritrocitos, dentro del campo circular; promedio por imagen. |
-| Detección de células | TP, FP, FN, precisión, sensibilidad, F1 | Emparejamiento uno a uno (algoritmo húngaro) con **IoU ≥ 0,5**. Se sacan del GT las células del borde. Los conteos se suman sobre todas las imágenes. |
+| Detección de células | TP, FP, FN, precisión, sensibilidad, F1 | Una célula segmentada está **bien detectada (TP)** si tiene **IoU ≥ 0,5** con una célula del GT. Las segmentadas sin pareja son FP y las del GT sin pareja, FN. Se sacan del GT las células del borde. Los conteos se suman sobre todas las imágenes. |
 | Clasificación | precisión, sensibilidad, especificidad, F1 | Sobre las células detectadas con pareja en el GT: clase predicha contra `clase_gt`. |
 | Parasitemia | estimada contra real | Promedio por imagen y error medio por imagen (puntos porcentuales). |
-| Final en test | detección de parasitadas de punta a punta | Solo las células marcadas como parasitadas contra las parasitadas del GT (IoU ≥ 0,5): mide segmentación y clasificación juntas. |
+| Detección final de células parasitadas | TP, FP, FN, precisión, sensibilidad, F1 | De punta a punta: **todas** las células que el sistema marcó como parasitadas contra **todas** las parasitadas del GT (IoU ≥ 0,5). Suma los errores de las dos etapas: FN = parasitadas que no se segmentaron o que se clasificaron como sanas; FP = sanas marcadas y objetos que no son ninguna parasitada. Se calcula en train y en test. |
 
-- **Por qué IoU ≥ 0,5:** es el criterio habitual en detección de objetos y, además, con IoU mayor a 0,5 cada célula solo puede emparejarse con una única célula de la otra máscara.
+**Diferencia entre clasificación y detección final:** la clasificación mide **solo el clasificador**, con las células que la segmentación encontró bien. La detección final mide **el sistema completo**, que es lo que le importa a quien lo usa. Por eso da un poco más bajo.
+
+- **Cómo se arman las parejas:** se calcula el IoU entre cada célula del GT y cada célula segmentada, y se empareja cada una con **una sola** de la otra máscara, buscando que las parejas tengan el mayor IoU posible. Una pareja cuenta como acierto si su IoU es al menos 0,5.
+- **Por qué IoU ≥ 0,5:** es el criterio habitual en detección de objetos. Además, con ese umbral **cada célula solo puede tener una pareja posible**: para llegar a 0,5, la célula segmentada tiene que cubrir más de la mitad de la célula del GT, y como las células segmentadas no se superponen entre sí, dos no pueden cubrir cada una más de la mitad de la misma. Así no hay ambigüedad sobre qué célula corresponde a cuál.
 - **Por qué se suman los conteos de todas las imágenes:** así cada célula pesa lo mismo, sin importar en qué imagen está.
 - **Por qué se sacan del GT las células del borde:** el pipeline las descarta a propósito (están cortadas). Si quedaran en el GT, se contarían como errores células que se decidió no analizar. Se usa la misma franja de 3 px.
 - **IoU y Dice no alcanzan solos:** miden superposición de píxeles, pero no dicen si cada célula quedó separada. Por eso se agregó la detección célula a célula.
@@ -342,7 +355,7 @@ Cada imagen de train se recomprimió con calidades 95 a 10 y se descomprimió. D
 | Segmentación | IoU 0,822 · Dice 0,902 |
 | Detección de células | 2.184 detectadas: 2.125 aciertos, 59 de más, 182 sin detectar. Precisión 0,973 · sensibilidad 0,921 · **F1 0,946** |
 | Clasificación (199 parasitadas y 1.926 sanas emparejadas) | Precisión 0,911 · sensibilidad 0,824 · especificidad 0,992 · **F1 0,865** |
-| De punta a punta | De las 217 parasitadas del GT: 18 se pierden en la segmentación y 164 se detectan y clasifican bien (**76 %**) |
+| Detección final de parasitadas (de punta a punta) | 211 parasitadas en el GT (sin las del borde) y 184 marcadas: 166 bien encontradas, 18 de más, 45 perdidas. Precisión 0,902 · sensibilidad 0,787 · **F1 0,841** |
 | Parasitemia (promedio por imagen) | Estimada 8,88 % contra real 9,75 % · **error medio 1,3 puntos** por imagen |
 
 F1 de la clasificación por paciente: 208 → 0,88 · 209 → 0,89 · 211 → 0,89 · 212 → 0,75 · **263 → 0,00** · 282 → 0,86.
@@ -366,7 +379,7 @@ Entre corchetes, el intervalo de confianza del 95 % (Wilson).
 | Clasificación, color Y textura (F1) | 0,865 (P 0,911 · S 0,824) | **0,791** (P 0,739 [0,54–0,87] · S 0,850 [0,64–0,95]) |
 | Clasificación, solo color (F1, referencia) | 0,832 (P 0,777 · S 0,894) | 0,690 (P 0,526 · S 1,000) |
 | Especificidad de la clasificación | 0,992 | **0,993** |
-| De punta a punta: parasitadas del GT bien encontradas | 164 / 217 (76 %) | **17 / 23 (74 %)** [0,54–0,87] |
+| Detección final de parasitadas (F1) | 0,841 (P 0,902 · S 0,787: 166 de 211) | **0,708** (P 0,680 · S 0,739: **17 de 23** [0,54–0,87]) |
 | Parasitemia: error medio por imagen | 1,33 puntos | **0,85 puntos** |
 
 ### Por imagen
@@ -378,7 +391,7 @@ Entre corchetes, el intervalo de confianza del 95 % (Wilson).
 | 105834 | 305 (sano) | 1,4 % | 0,0 % | 4 | – |
 | 110230 | 305 (sano) | 0,7 % | 0,0 % | 2 | – |
 
-De las 23 parasitadas de test: **3 se pierden en la segmentación** (no quedan como célula detectada), **3 se clasifican como sanas** y **17 se detectan bien**.
+De las 23 parasitadas de test: **3 se pierden en la segmentación** (no quedan como célula detectada), **3 se clasifican como sanas** y **17 se detectan bien**. Además, el sistema marcó 8 células de más: las 6 sanas del paciente 305 y 2 objetos que no son ninguna parasitada del GT. Esos 17 / 8 / 6 son los de la detección final (F1 0,708).
 
 ### Análisis
 
