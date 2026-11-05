@@ -233,3 +233,4 @@ data/shared/pred/
 
 __pycache__/
 *.pyc
+data/shared/features/
