@@ -1,11 +1,19 @@
+# Versiones exactas con las que se desarrolló y se obtuvieron los resultados (Python 3.14.6)
+# Instalar con: python -m pip install -r requirements.txt
 
-numpy>=2.2
-opencv-python>=4.11
-matplotlib>=3.10
-pandas>=2.3
-scikit-image>=0.25
-scikit-learn>=1.7
-scipy>=1.16
-Pillow>=11.3
-jupyter>=1.1
-ipykernel>=6.30
+# Procesamiento de imágenes y cálculo
+numpy==2.5.4
+opencv-python==5.0.0.93
+scikit-image==0.26.0
+scipy==1.18.1
+Pillow==13.0.0
+
+# Datos, clasificación y estadística
+pandas==3.1.0
+scikit-learn==1.9.1
+joblib==1.6.0
+
+# Gráficos y notebooks
+matplotlib==3.11.2
+jupyter==1.1.1
+ipykernel==7.4.0

@@ -57,7 +57,8 @@ def decidir(decision, pred_c5, atributos_tex):
     return tex            # "Textura (atributo)"
 
 
-def evaluar_test(guardados, marcadas, metodo):
+def evaluar_test(guardados, marcadas, metodo, carpeta=RESULTS):
+    #carpeta (agregado): dónde se guardan los dos CSV. Por defecto, texture_eval/results como antes; main.py le pasa pred/resultados_test.
     """Evaluación end-to-end contra el GT de parasitadas (matching IoU >= 0,5), sin reajustar nada.
     guardados: una entrada por imagen con 'patient_id', 'image_id', 'celulas' (filas en el orden de las
     etiquetas 1..N), 'etiquetas' (mapa de la predicción), 'campo' y 'gt' (mapa GT de parasitadas).
@@ -78,7 +79,7 @@ def evaluar_test(guardados, marcadas, metodo):
     total["IoU_medio"] = [ponderado(d, "IoU_medio_TP") for d in detalle.values()]
     total["Dice_medio"] = [ponderado(d, "Dice_medio_TP") for d in detalle.values()]
 
-    RESULTS.mkdir(parents=True, exist_ok=True)
-    total.round(4).to_csv(RESULTS / f"b6_pred_{metodo}_test_total.csv")
-    pd.concat(detalle, names=["metodo"]).to_csv(RESULTS / f"b6_pred_{metodo}_test_por_imagen.csv")
+    carpeta.mkdir(parents=True, exist_ok=True)
+    total.round(4).to_csv(carpeta / f"b6_pred_{metodo}_test_total.csv")
+    pd.concat(detalle, names=["metodo"]).to_csv(carpeta / f"b6_pred_{metodo}_test_por_imagen.csv")
     return total

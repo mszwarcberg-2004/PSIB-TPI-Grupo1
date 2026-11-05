@@ -1,576 +1,260 @@
-# Decisiones y avances del proyecto
+# Criterios y decisiones del TP
 
-## 1. Selección y organización del dataset
+Resumen de **qué hace cada paso del pipeline, con qué valor y por qué**. Sirve para justificar el código en el informe y en la defensa oral.
+El registro completo de todo lo que se probó en el Bloque A, en orden cronológico, está en [`docs/report_detallado.md`](docs/report_detallado.md).
 
-Se seleccionaron **16 imágenes del Polygon Set de NIH-NLM-ThinBloodSmearsPf**, correspondientes a 8 pacientes (2 imágenes por paciente).
+## 0. Reglas que respetamos en todo el trabajo
 
-**Decisiones y justificación:**
-- **Selección de imágenes:** se buscaron imágenes con eritrocitos parasitados y no parasitados, y variedad en la tinción y distribución celular, para evaluar el algoritmo en distintas condiciones.
-- **División por paciente:** se asignaron 6 pacientes a entrenamiento (12 imágenes) y 2 a prueba (4 imágenes). Esto evita que imágenes de un mismo paciente aparezcan en ambos conjuntos y reduce el riesgo de fuga de información.
-- **Resolución original:** se decidió trabajar inicialmente sin reescalar las imágenes para conservar los detalles celulares, importantes para el análisis posterior de color y textura.
-- **Conservación de originales:** todas las operaciones de preprocesamiento y segmentación se realizan sobre copias o variables derivadas. Las imágenes originales no se modifican ni sobrescriben.
+1. **Test no se usa para ninguna decisión.** Métodos, parámetros, umbrales y atributos se eligen solo con train. Test se corre **una única vez** al final, con todo fijo (`EVALUACION_FINAL = True` en `main.py`).
+2. **División por paciente:** ningún paciente está a la vez en train y en test.
+3. **Cada parámetro tiene un criterio explícito:** un percentil de train, una comparación en train o una regla automática por imagen.
+4. **Parámetros relativos a la escala** cuando se puede (radio y área típicos estimados en cada imagen, sin GT).
+5. **Contra el sobreajuste:** validación dejando un paciente afuera (LOPO) o tabla de sensibilidad alrededor del valor elegido.
+6. **El GT se usa para medir y para elegir parámetros en train**, nunca para decidir en una imagen nueva. `procesar_imagen` de `main.py` no usa el GT.
 
-El subconjunto contiene **240 eritrocitos parasitados y 3.111 no parasitados**, según el Ground Truth (GT). Este desbalance deberá considerarse especialmente al evaluar la clasificación de células infectadas.
+## 1. Dataset
 
-## 2. Uso del Ground Truth y metodología de evaluación
+- **NIH-NLM-ThinBloodSmearsPf, Polygon Set.** Frotis finos teñidos con Giemsa, *P. falciparum*. JPG RGB de 5312 × 2988 píxeles, con un campo circular de microscopio.
+- **GT:** polígonos de cada célula, con la clase `Parasitized`, `Uninfected` o `White_Blood_Cell`.
+- **Selección:** 16 imágenes de 8 pacientes (2 por paciente), con variedad de tinción y de parasitemia.
 
-Se implementaron funciones compartidas para cargar las imágenes RGB, leer las anotaciones del GT y seleccionar las imágenes según su conjunto.
-
-También se visualizaron los polígonos del GT sobre las imágenes originales para comprobar visualmente su correspondencia con las células.
-
-**Decisiones y justificación:**
-- **GT como referencia:** se utiliza para comparar las máscaras predichas con las anotaciones reales, pero nunca para detectar automáticamente los eritrocitos.
-- **Entrenamiento:** se utilizan los GT de las 12 imágenes de train para comparar configuraciones y seleccionar parámetros.
-- **Prueba:** las 4 imágenes de test se reservan para evaluar el algoritmo una vez definido, sin ajustar sus parámetros según esos resultados.
-- **Métricas:** se utilizan IoU y Dice para medir la superposición entre la máscara segmentada y el GT.
-
-Para esta evaluación se construye una máscara binaria del GT que incluye los polígonos de eritrocitos parasitados y no parasitados, excluyendo los glóbulos blancos.
-
-**Importante:** las métricas obtenidas en train son resultados de desarrollo, no una estimación independiente del rendimiento. Además, IoU y Dice miden superposición de píxeles, no la correcta separación de cada célula individual.
-
-## 3. Exclusión del borde negro del microscopio
-
-Las imágenes presentan un campo de visión circular rodeado por un borde negro, cuya intensidad podría confundirse con estructuras celulares oscuras.
-
-**Decisión:** generar una máscara circular que delimite la región válida antes de aplicar la segmentación.
-
-**Implementación:**
-1. Umbralizar la imagen para distinguir el campo de visión del borde negro.
-2. Seleccionar la región conectada más grande.
-3. Rellenar sus huecos.
-4. Aplicar una pequeña erosión para excluir posibles artefactos del borde.
-
-**Justificación:** evitar que los píxeles negros externos influyan en el cálculo de umbrales y generen falsas detecciones.
-
-La máscara circular se utiliza durante el procesamiento sin modificar la imagen RGB original.
-
-## 4. Segmentación de eritrocitos mediante Otsu
-
-Se eligió **Otsu como primer método de segmentación**, para establecer una referencia inicial (*baseline*) que permita comparar posteriormente con K-means y GMM.
-
-### 4.1. Selección del canal verde
-
-**Decisión:** aplicar Otsu al canal verde de la imagen RGB.
-
-**Justificación:** se buscó aprovechar el contraste de intensidad entre los eritrocitos teñidos y el fondo claro. La elección también se consideró a partir de bibliografía sobre segmentación de células sanguíneas teñidas con Giemsa.
-
-**Respaldo del análisis de color (Bloque C, notebook C1):** se comparó qué tan bien cada canal de RGB, HSV y Lab separa los píxeles de fondo de los de células (AUC, solo train). El mejor fue **G** (AUC 0,969), prácticamente igual a L de Lab (0,967). Esto confirma la elección del canal verde.
-
-**Normalización de color (Bloque C, notebook C2):** se evaluó normalizar el color de cada imagen (balance de blancos y Reinhard). Para separar células del fondo no mejoró, porque Otsu ya calcula el umbral en cada imagen. Por eso no se incorporó a la segmentación.
-
-Otsu determina automáticamente un umbral que separa dos grupos de intensidades. En nuestro caso, los píxeles más oscuros que el umbral se consideran posibles regiones celulares.
-
-El umbral se calcula utilizando únicamente los píxeles del campo circular.
-
-**Limitación:** esta segmentación detecta posibles eritrocitos, pero todavía no distingue entre parasitados y no parasitados.
-
-### 4.2. Selección del preprocesamiento
-
-Se compararon distintas configuraciones de Otsu sobre las **12 imágenes de entrenamiento**, utilizando IoU y Dice respecto del GT.
-
-Se evaluaron:
-- Otsu con y sin filtro gaussiano.
-- Apertura y cierre morfológicos.
-- Relleno de huecos.
-- Corrección de iluminación.
-- Mejora de contraste local mediante CLAHE.
-- Combinaciones de estas operaciones.
-
-**Decisiones y justificación:**
-
-**Filtro gaussiano:** se incorporó para reducir pequeñas variaciones de intensidad antes de calcular el umbral. Su mejora individual fue pequeña, pero se mantuvo en la configuración seleccionada.
-
-**CLAHE:** se incorporó porque mejora el contraste local y permitió distinguir mejor los eritrocitos del fondo. Fue el preprocesamiento que produjo la mejora más importante en las métricas.
-
-**Corrección de iluminación:** se probó para compensar diferencias de iluminación, pero empeoró las métricas con los parámetros utilizados. Por lo tanto, no se incorporó al pipeline actual.
-
-**Conservación de colores originales:** CLAHE se aplica solamente a una copia del canal verde para realizar la segmentación. Los recortes celulares se extraen de la imagen RGB original, para preservar la información cromática necesaria en las etapas posteriores.
-
-### 4.3. Selección de operaciones morfológicas
-
-Se observó que algunos eritrocitos presentan un centro más claro que su periferia. Como consecuencia, Otsu puede segmentar solamente el contorno y dejar huecos negros en el interior.
-
-**Decisión:** aplicar operaciones morfológicas después de Otsu.
-
-- **Apertura:** elimina pequeñas regiones aisladas de ruido.
-- **Cierre:** ayuda a cerrar pequeñas discontinuidades.
-- **Relleno de huecos:** recupera regiones interiores que deberían formar parte de los eritrocitos.
-
-El relleno se limita a huecos pequeños para evitar completar regiones excesivamente grandes.
-
-**Resultado:** el relleno de huecos fue la operación que más contribuyó a mejorar la superposición con el GT. La apertura y el cierre aportaron una mejora adicional pequeña.
-
-### 4.4. Resultados y configuración seleccionada
-
-La comparación de las principales configuraciones sobre train produjo:
-
-| Configuración | IoU promedio | Dice promedio |
+| Conjunto | Pacientes | Imágenes |
 |---|---:|---:|
-| Otsu sin filtro | 0.7615 | 0.8636 |
-| Otsu + gaussiano + limpieza completa | 0.8025 | 0.8901 |
-| CLAHE + gaussiano + Otsu, sin limpieza | 0.7862 | 0.8796 |
-| CLAHE + gaussiano + Otsu + solo relleno | 0.8215 | 0.9019 |
-| **CLAHE + gaussiano + Otsu + limpieza completa** | **0.8224** | **0.9024** |
+| Train | 6 | 12 |
+| Test | 2 | 4 |
 
-*Valores con el relleno de huecos final (`HUECO_MAX` = 4.086, sección 10). La primera versión de esta comparación usó 1.500 (mejor configuración: IoU 0,8016, Dice 0,8894, que es el valor que aparece en las secciones 5, 7 y 9). Con 4.086 suben las configuraciones que rellenan huecos, pero el orden es el mismo.*
+- En total hay 240 parasitados, 3.111 sanos y 13 glóbulos blancos. **Las clases están muy desbalanceadas** (alrededor de 1 parasitada cada 13 sanas), por eso se usa F1 y no exactitud.
+- En train, las parasitadas están concentradas: el paciente 209 tiene 145 de las 217, y tres pacientes tienen solo 4 o 5.
 
-**Configuración seleccionada:**
+## 2. Pipeline
 
-**Canal verde → CLAHE → filtro gaussiano → Otsu → apertura → cierre → relleno de huecos.**
-
-**Justificación:** fue la configuración con mayor IoU y Dice promedio sobre las imágenes de entrenamiento.
-
-Se conservó la limpieza completa porque presentó el mejor resultado, aunque la diferencia respecto de utilizar solamente relleno de huecos fue mínima.
-
-Esta configuración se considera el **baseline de Otsu**, pendiente de su evaluación independiente sobre test.
-
-## 5. Etiquetado, filtrado y extracción de células
-
-Una vez obtenida la máscara binaria, se implementó el procesamiento de objetos individuales.
-
-### 5.1. Etiquetado de componentes conectadas
-
-Se aplica etiquetado de componentes conectadas con **conectividad 8**, asignando un número diferente a cada región blanca conectada.
-
-**Objetivo:** identificar objetos candidatos a eritrocitos para analizarlos individualmente.
-
-**Limitación:** dos eritrocitos en contacto pueden formar una única región y recibir la misma etiqueta.
-
-### 5.2. Filtrado de objetos
-
-Se utilizan propiedades geométricas de cada región etiquetada.
-
-**Criterios actuales:**
-- Área mínima: 6.000 píxeles.
-- Área máxima: 22.000 píxeles.
-- Exclusión de objetos que tocan la franja de seguridad próxima al borde circular (3 píxeles).
-
-Inicialmente se usaron 800 y 12.000 píxeles. Estos valores se corrigieron después de medir las áreas reales del GT (ver sección 5.5), y finalmente se reemplazaron por un filtro relativo al área típica de cada imagen (sección 10).
-
-**Justificación:**
-- Eliminar pequeñas manchas de ruido.
-- Descartar regiones demasiado grandes que podrían corresponder a células agrupadas u otros objetos.
-- Evitar recortes de eritrocitos incompletos en los bordes.
-
-Estos umbrales no garantizan que todos los objetos aceptados sean eritrocitos correctamente segmentados.
-
-### 5.3. Extracción de recortes y máscaras
-
-Para cada objeto aceptado se obtiene su *bounding box* y se generan:
-
-- **Crop RGB:** recorte de la imagen original, conservando únicamente los píxeles de la región celular y dejando el fondo negro.
-- **Máscara individual:** imagen binaria que representa la región detectada.
-- **Registro en `cells_pred.csv`:** identificador, paciente, imagen, conjunto, coordenadas, área y circularidad.
-
-**Decisión:** guardar por separado los resultados de cada método de segmentación, para evitar que futuras ejecuciones sobrescriban resultados anteriores.
-
-La estructura adoptada es:
-
-```text
-data/shared/pred/
-    otsu/
-        crops/
-        masks/
-        cells_pred.csv
-    kmeans/
-    gmm/
+```
+Imagen RGB
+ → [A] campo circular → CLAHE (canal G) + gaussiano → Otsu sobre G → apertura, cierre y relleno de huecos
+ → [A] Watershed (separa células pegadas) → [A+C] exclusión de glóbulos blancos → [A] filtro de área y borde
+ → recorte y máscara de cada célula (de la imagen ORIGINAL, sin CLAHE)
+ → [B] textura GLCM   +   [C] color (con normalización por el fondo)
+ → [B+C] clasificación: parasitada si (tiene mancha oscura) Y (contrast_d3 ≥ 0,709)
+ → [C] parasitemia y máscara de eritrocitos parasitados
+ → evaluación contra el GT (solo para medir)
 ```
 
-Las rutas se generan mediante la función compartida `rutas_segmentacion(metodo)`.
+**Estrategia elegida:** primero segmentar **todos** los eritrocitos y después clasificar cada uno. Así se separa el problema de *encontrar* las células del de *decidir si están infectadas*, y la parasitemia se calcula directamente (parasitadas / total).
 
-### 5.4. Resultados y limitaciones observadas
+## 3. Preprocesamiento (Bloque A y C)
 
-Al ejecutar el pipeline de Otsu sobre las 12 imágenes de entrenamiento se obtuvieron **618 objetos aceptados** después del filtrado.
+| Paso | Valor | Criterio | Archivo |
+|---|---|---|---|
+| Campo circular | gris > 20; región conexa más grande; erosión de 5 px | Excluir el borde negro, que Otsu confundiría con células. Los 5 px evitan artefactos JPEG del borde. | `segmentation/preprocess.py` |
+| Canal verde (G) | — | Es el que mejor separa célula de fondo: AUC 0,969 (C1, train), igual a L de Lab (0,967). | `cluster_segmentation.py` |
+| CLAHE en G | clip 2,0; grilla 8×8 | Fue la mejora más grande en la comparación de configuraciones (IoU 0,803 → 0,822). | `preprocess.py` |
+| Filtro gaussiano | 5×5 | Reduce ruido antes de Otsu. Casi no influye en el resultado (ver tabla de sensibilidad, sección 5). | `preprocess.py` |
+| Corrección de iluminación | **descartada** | Empeoró (IoU 0,803 → 0,775). | — |
+| Normalización de color por el fondo | fondo de referencia de train: RGB (220, 181, 166) | Cada canal se multiplica para que el fondo quede igual a la referencia. **No se usa para segmentar** (Otsu ya calcula el umbral en cada imagen, C2), **sí para color y glóbulos blancos**, que usan umbrales fijos. | `color_stain/normalizacion.py` |
 
-La inspección visual mostró resultados mixtos:
-- Algunos eritrocitos se segmentaron y recortaron correctamente.
-- Otros quedaron incompletos o presentaron formas irregulares.
-- Algunas regiones pueden agrupar células que están en contacto.
+**Los recortes se toman de la imagen original**, no de la preprocesada, para que la textura y el color usen las intensidades reales.
 
-**Decisión:** conservar Otsu como método de referencia y avanzar con otros métodos, en lugar de continuar ajustándolo indefinidamente.
+**Comparación de configuraciones** (IoU promedio en train, `segmentation/comparar_otsu.py`):
 
-**Justificación:** disponer de un baseline permite comparar objetivamente si K-means y GMM mejoran la segmentación.
+| Configuración | IoU | Dice |
+|---|---:|---:|
+| Otsu sin filtro | 0,762 | 0,864 |
+| Otsu + gaussiano + limpieza | 0,803 | 0,890 |
+| CLAHE + gaussiano + Otsu, sin limpieza | 0,786 | 0,880 |
+| **CLAHE + gaussiano + Otsu + limpieza (elegida)** | **0,822** | **0,902** |
 
-El número de objetos aceptados no constituye por sí mismo una métrica de calidad. La evaluación debe complementarse con IoU, Dice e inspección visual.
+## 4. Segmentación: Otsu sobre G (Bloque A)
 
-*Nota: estos 618 objetos corresponden al filtro de área original (800 a 12.000 píxeles). Con el filtro corregido se aceptan 1.175 (sección 5.5).*
+- **Otsu** elige automáticamente, en cada imagen, el umbral que mejor separa dos grupos de intensidad. Los píxeles más oscuros que el umbral son célula.
+- Se calcula solo con los píxeles del campo circular.
 
-Aclaración sobre los resultados: el IoU de 0.8016 y el Dice de 0.8894 corresponden a la máscara de Otsu después de CLAHE y limpieza morfológica, pero antes del etiquetado y filtrado de objetos. Por otro lado, los 618 objetos corresponden a las regiones aceptadas después del filtrado por área y borde. Por lo tanto, las métricas evalúan la superposición de la máscara de segmentación con el GT, mientras que el número de objetos indica cuántas regiones fueron aceptadas para la extracción de células.
+**Por qué Otsu y no K-means o GMM** (agrupamiento por color en Lab, K = 3, ajustado en cada imagen sin etiquetas). Con el pipeline completo, en train:
 
-### 5.5. Corrección del filtro de área
+| Método | IoU | F1 de detección |
+|---|---:|---:|
+| **Otsu (G)** | **0,822** | **0,946** |
+| K-means (Lab) | 0,806 | 0,879 |
+| GMM (Lab) | 0,786 | 0,864 |
 
-Al comparar el filtro con las áreas de los eritrocitos del GT de **train** se observó que el área máxima de 12.000 píxeles era demasiado baja:
+Otsu es el mejor y además el más simple. K-means y GMM unen más células vecinas.
+- **Lab** para el agrupamiento: fue el espacio que mejor agrupó los píxeles sin etiquetas (C1, ARI). En HSV el tono es circular.
+- **K = 3:** fondo, eritrocito y zonas oscuras.
 
-| Área de los eritrocitos del GT (train) | Píxeles |
-|---|---:|
-| Percentil 1 | 8.175 |
-| Percentil 5 | 9.872 |
-| Mediana | 13.929 |
-| Percentil 95 | 17.832 |
-| Percentil 99 | 19.536 |
+## 5. Limpieza morfológica (Bloque A)
 
-El 81% de los eritrocitos del GT superaba los 12.000 píxeles, por lo que el filtro descartaba la mayoría de las células individuales y no solo las células pegadas.
-
-**Decisión:** usar un área mínima de **6.000** y una máxima de **22.000** píxeles.
-
-**Justificación:**
-- Los límites se apoyan en los percentiles 1 y 99 del GT de train, con margen hacia abajo porque nuestras máscaras resultan algo más chicas que los polígonos del GT.
-- Se probaron varias combinaciones sobre train con la evaluación célula a célula (sección 5.6), y esta fue de las que mejor equilibró precisión y sensibilidad:
-
-| Área mín. - máx. | TP | FP | FN | Precisión | Sensibilidad | F1 |
-|---|---:|---:|---:|---:|---:|---:|
-| 800 - 12.000 (original) | 527 | 91 | 1.780 | 0.853 | 0.228 | 0.360 |
-| 800 - 20.000 | 1.110 | 103 | 1.197 | 0.915 | 0.481 | 0.631 |
-| 5.000 - 20.000 | 1.110 | 56 | 1.197 | 0.952 | 0.481 | 0.639 |
-| **6.000 - 22.000** | **1.119** | **56** | **1.188** | **0.952** | **0.485** | **0.643** |
-| 8.000 - 22.000 | 1.099 | 44 | 1.208 | 0.962 | 0.476 | 0.637 |
-| 6.000 - 25.000 | 1.138 | 78 | 1.169 | 0.936 | 0.493 | 0.646 |
-
-Se eligió 6.000 - 22.000 en lugar de 6.000 - 25.000 porque, con una mejora mínima de F1, el segundo acepta más falsos positivos (objetos grandes que suelen ser dos células pegadas).
-
-**Resultado:** con Otsu, la cantidad de células aceptadas en train pasó de 618 a **1.175**.
-
-**Limitación:** la mayoría de los eritrocitos que siguen sin detectarse corresponden a células en contacto, que forman un único objeto demasiado grande o con IoU bajo respecto de cada célula del GT. Esto se resolvió después con Watershed (sección 8).
-
-### 5.6. Evaluación célula a célula (matching)
-
-IoU y Dice globales miden superposición de píxeles, pero no indican si cada eritrocito se detectó por separado. Por eso se agregó una evaluación individual.
-
-**Método:**
-1. Se construye un mapa de etiquetas del GT (cada eritrocito con un número distinto, sin glóbulos blancos).
-2. Se calcula el IoU entre cada célula del GT y cada célula predicha aceptada.
-3. Se emparejan las células uno a uno (algoritmo húngaro) y un par se considera **verdadero positivo (TP)** si su IoU es al menos **0,5**.
-4. Las células predichas sin pareja son **falsos positivos (FP)** y las del GT sin pareja son **falsos negativos (FN)**.
-5. Se calculan precisión, sensibilidad y F1 sumando TP, FP y FN de todas las imágenes (así cada célula pesa lo mismo, independientemente de la imagen).
-
-**Decisiones y justificación:**
-- **Umbral de IoU 0,5:** es el criterio habitual en detección de objetos. Además, con IoU mayor a 0,5 cada célula solo puede emparejarse con una única célula de la otra máscara.
-- **Exclusión de las células del GT cortadas por el borde:** nuestro filtrado descarta a propósito las células que tocan el borde del campo circular. Si se dejaran en el GT, se contarían como FN células que se decidió no analizar. Se usa la misma franja de 3 píxeles en ambos casos.
-- **Solo células aceptadas:** se evalúan las células que pasaron el filtrado, porque son las que se usan en las etapas siguientes.
-
-Resultado con Otsu sobre train:
-
-| TP | FP | FN | Precisión | Sensibilidad | F1 |
-|---:|---:|---:|---:|---:|---:|
-| 1.119 | 56 | 1.188 | 0.952 | 0.485 | 0.643 |
-
-**Interpretación:** casi todo lo que se acepta es un eritrocito bien segmentado (precisión alta), pero todavía se pierde aproximadamente la mitad de las células, principalmente por contacto entre células.
-
-*Con Watershed (sección 8), el F1 de Otsu pasó a 0,880.*
-
-## 6. Segmentación mediante K-means y GMM
-
-Se implementaron dos métodos de agrupamiento por color, como alternativa a Otsu.
-
-**Implementación:**
-1. Se usa la misma imagen preprocesada que para Otsu (CLAHE en el canal verde y filtro gaussiano) y el mismo campo circular.
-2. La imagen se convierte al espacio **Lab**, que separa la luminosidad (L) de la información de color (a y b).
-3. Se agrupan los píxeles en **K = 3** grupos: fondo, eritrocitos y zonas más oscuras (por ejemplo, parásitos o núcleos).
-4. El modelo se ajusta sobre una muestra aleatoria de **50.000 píxeles** del campo (con semilla fija, para que sea reproducible) y después se clasifican todos los píxeles por partes.
-5. El grupo con mayor luminosidad (L) se considera fondo; el resto forma la máscara de eritrocitos.
-6. Después se aplica la misma limpieza morfológica, etiquetado y filtrado que con Otsu.
-
-**Decisiones y justificación:**
-- **Muestra de píxeles:** cada imagen tiene unos 7 millones de píxeles dentro del campo. Ajustar el modelo con una muestra da resultados equivalentes y reduce mucho el tiempo de cálculo.
-- **Ajuste por imagen:** el modelo se ajusta en cada imagen, sin usar etiquetas. No hay entrenamiento con el GT ni uso de test.
-- **Espacio Lab:** en el análisis de color del Bloque C (notebook C1) se agruparon píxeles de train sin etiquetas en RGB, HSV y Lab, y se midió cuánto coincidían los grupos con las clases reales (ARI). Lab fue el mejor (K-means 0,38; GMM 0,41), y en HSV el tono es circular (el rosa está cerca de 0 y de 179 a la vez), lo que complica agruparlo. Por eso la segmentación por agrupamiento usa **solo Lab**.
-- **GMM con covarianza completa:** permite grupos de forma elíptica, a diferencia de K-means, que supone grupos esféricos.
-- **Se mantiene CLAHE en el preprocesamiento:** se probó aplicar K-means y GMM sin CLAHE, porque CLAHE modifica solo el canal verde y altera el color. Sin embargo, sin CLAHE los resultados empeoraron en train (IoU de K-means 0,801 → 0,765; GMM 0,785 → 0,683), por lo que se mantuvo.
-
-## 7. Comparación preliminar de los métodos de segmentación
-
-Resultados sobre las 12 imágenes de train, con el mismo preprocesamiento, limpieza y filtrado, **antes de incorporar Watershed** (la comparación con Watershed está en la sección 8.5):
-
-| Método | IoU global | Dice global | Células aceptadas | TP | FP | FN | Precisión | Sensibilidad | F1 |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| **Otsu** | **0.8016** | **0.8894** | 1.175 | 1.119 | 56 | 1.188 | 0.952 | **0.485** | **0.643** |
-| K-means | 0.8009 | 0.8868 | 776 | 758 | 18 | 1.549 | 0.977 | 0.329 | 0.492 |
-| GMM | 0.7847 | 0.8779 | 638 | 621 | 17 | 1.686 | 0.973 | 0.269 | 0.422 |
-
-**Observaciones:**
-- A nivel de píxeles, Otsu y K-means son prácticamente equivalentes; GMM es algo peor.
-- A nivel de células individuales, Otsu detecta bastantes más células. K-means y GMM tienen mayor precisión pero aceptan menos objetos, probablemente porque generan más uniones entre células vecinas, que quedan fuera del filtro de área.
-- El filtro de área se calibró con Otsu; todavía no se ajustó para K-means y GMM.
-
-**Estado:** comparación preliminar. La elección final del método se hará después de incorporar Watershed, porque la separación de células pegadas puede cambiar el resultado de K-means y GMM.
-
-**Actualización:** con Watershed, Otsu siguió siendo el mejor método (sección 8.5). Se propone mantenerlo como método final (es el que usa `main.py`).
-
-## 8. Separación de células en contacto mediante Watershed
-
-### 8.1. Problema
-
-Después de la limpieza morfológica, los eritrocitos que se tocan quedan unidos en un único objeto blanco. El etiquetado de componentes conectadas les asigna la misma etiqueta, y entonces:
-- el objeto resulta demasiado grande y el filtro de área lo descarta, o
-- se acepta, pero su IoU con cada célula del GT es bajo y no cuenta como detección.
-
-Sin separar células, la sensibilidad de detección con Otsu era de 0,485: se perdía aproximadamente la mitad de los eritrocitos, principalmente por contacto entre células.
-
-### 8.2. Método
-
-Watershed ("divisoria de aguas") separa objetos unidos interpretando la imagen como un relieve topográfico.
-
-1. **Transformada de distancia:** a cada píxel de la máscara se le asigna su distancia al píxel de fondo más cercano. El valor es máximo en el centro de cada eritrocito y disminuye en la zona angosta donde se tocan dos células.
-2. **Marcadores:** se buscan los máximos locales de la distancia. Cada máximo representa el centro de una célula.
-3. **Inundación:** se invierte la distancia (los centros pasan a ser "pozos") y se inunda el relieve desde cada marcador. Donde se encuentran las aguas de dos marcadores distintos se traza el límite entre las dos células.
-4. El resultado es una imagen de etiquetas con cada célula separada, que reemplaza al etiquetado simple. Después se aplican el mismo filtrado por área y borde y la misma extracción de recortes.
-
-Watershed no agrega ni elimina píxeles de la máscara: solo divide objetos. Por eso el IoU y el Dice globales no cambian.
-
-### 8.3. Parámetro automático: distancia mínima entre centros
-
-Si dos máximos están muy cerca, probablemente pertenecen a la misma célula; si se aceptaran ambos, una célula se cortaría en pedazos (sobresegmentación). Por eso se exige una distancia mínima entre centros.
-
-**Decisión:** calcular esa distancia automáticamente en cada imagen como `0,7 × radio típico de un eritrocito`.
-
-**Estimación del radio (sin GT):** para cada objeto de la máscara, el máximo de la transformada de distancia es aproximadamente el radio de una célula (incluso si el objeto son dos células pegadas). El radio típico de la imagen es la **mediana** de esos valores; se usa la mediana para que manchas pequeñas o grupos grandes no la desplacen. Con Otsu se obtiene un radio de unos 47 píxeles.
-
-**Justificación:** el parámetro se adapta a cada imagen (si las células se ven más grandes o más chicas, la distancia cambia con ellas) y no depende del GT.
-
-### 8.4. Selección de la variante
-
-Se compararon sobre train dos formas de obtener los marcadores, con distintos valores:
-- **Máximos locales con distancia mínima** (`peak_local_max`), con distancia mínima de 0,5; 0,7 y 0,9 radios.
-- **H-máximos:** máximos que sobresalen al menos una altura h de su entorno, con h de 0,1 y 0,2 radios.
-
-| Variante | Otsu: precisión | Otsu: sensibilidad | Otsu: F1 | K-means: F1 |
-|---|---:|---:|---:|---:|
-| Sin Watershed | 0.952 | 0.485 | 0.643 | 0.492 |
-| Máximos locales, 0,5 × radio | 0.934 | 0.834 | 0.881 | 0.816 |
-| **Máximos locales, 0,7 × radio** | **0.938** | **0.828** | **0.880** | **0.839** |
-| Máximos locales, 0,9 × radio | 0.936 | 0.821 | 0.875 | 0.832 |
-| H-máximos, h = 0,1 × radio | 0.895 | 0.814 | 0.853 | 0.845 |
-| H-máximos, h = 0,2 × radio | 0.910 | 0.804 | 0.854 | 0.834 |
-
-**Decisión:** máximos locales con distancia mínima de **0,7 × radio**.
-
-**Justificación:**
-- Con Otsu, 0,5 y 0,7 son prácticamente iguales, pero 0,7 es claramente mejor con K-means, por lo que es más estable entre métodos.
-- Los h-máximos generaron más falsos positivos con Otsu (más células cortadas en pedazos) y tardaron aproximadamente el doble.
-
-### 8.5. Resultados
-
-Detección célula a célula sobre train, con Watershed incorporado:
-
-| Método | TP | FP | FN | Precisión | Sensibilidad | F1 |
-|---|---:|---:|---:|---:|---:|---:|
-| **Otsu** | 1.911 | 127 | 396 | **0.938** | 0.828 | **0.880** |
-| K-means | 1.875 | 286 | 432 | 0.868 | 0.813 | 0.839 |
-| GMM | 1.911 | 343 | 396 | 0.848 | 0.828 | 0.838 |
-
-- Con Otsu, las células detectadas pasaron de 1.119 a **1.911** (de 2.307 eritrocitos del GT, sin contar los del borde), y el F1 de **0,643 a 0,880**.
-- Watershed mejoró mucho más a K-means y GMM (que unían más células), pero Otsu sigue siendo el mejor.
-
-**Limitaciones:**
-- Los falsos positivos aumentaron (de 56 a 127 con Otsu): algunas células alargadas o con formas irregulares se cortan en dos.
-- El filtro de área (6.000 - 22.000 píxeles) se calibró antes de incorporar Watershed; conviene revisarlo.
-- Grupos de células muy superpuestas pueden seguir sin separarse, porque no se forma una "cintura" clara entre ellas.
-
-**Implementación:** `segmentation/watershed_split.py` (`separar_celulas` y `estimar_radio`). Se activa con `APLICAR_WATERSHED = True` en `a1_segmentacion_base.py`, y con `False` se puede volver al etiquetado simple para comparar.
-
-### 8.6. Uso del gradiente (Sobel) en Watershed
-
-En el Bloque C (notebook C2) se compararon filtros pasa altos para resaltar el contorno de los eritrocitos: **Sobel y Prewitt con suavizado gaussiano previo** fueron los mejores (AUC borde vs fondo 0,95, contra 0,88 sin suavizar), y el Laplaciano el peor. Se propuso usar el gradiente como relieve de Watershed, para que el límite entre dos células caiga sobre su borde.
-
-Se probó sobre train con Otsu, manteniendo los mismos marcadores (centros) y cambiando solo el relieve que se inunda:
-
-| Relieve | Precisión | Sensibilidad | F1 |
-|---|---:|---:|---:|
-| **Distancia al fondo (elegido)** | 0.938 | 0.828 | **0.880** |
-| Sobel de G suavizado | 0.931 | 0.680 | 0.786 |
-| Distancia + 0,5 × Sobel | 0.938 | 0.825 | 0.878 |
-| Distancia + 1 × Sobel | 0.941 | 0.821 | 0.877 |
-
-**Decisión:** mantener la distancia al fondo. Sobel y Prewitt con gaussiano son los mejores detectores de bordes (C2), pero usar el gradiente en Watershed no mejoró la detección, porque los bordes entre células en contacto son débiles y los parásitos generan bordes internos (la respuesta del filtro dentro de las células parasitadas es 5 a 7 veces mayor que en las sanas).
-
-## 9. Exclusión de glóbulos blancos
-
-### 9.1. Problema
-
-Las imágenes tienen algunos glóbulos blancos (10 en train). Son más grandes que un eritrocito y Otsu los segmenta igual que a los eritrocitos, porque también son más oscuros que el fondo. Watershed suele cortarlos en varios pedazos, y en train **3 de esos pedazos entraban en el filtro de área** y se guardaban como si fueran eritrocitos. Esos falsos eritrocitos después se analizarían en textura, color y clasificación.
-
-### 9.2. Idea: detectar el núcleo y eliminar el objeto que lo contiene
-
-Un glóbulo blanco tiene dos partes:
-- **Núcleo:** grande, violeta y muy oscuro. Es lo que lo distingue claramente de un eritrocito.
-- **Citoplasma:** claro, con un color parecido al de los eritrocitos o al fondo. Por color no se puede distinguir.
-
-Por eso no se busca el glóbulo blanco completo por color, sino solo su **núcleo**, y después se elimina el **objeto segmentado entero** que lo contiene (núcleo y citoplasma). Si solo se borraran los píxeles del núcleo, el citoplasma quedaría como pedazos que pasan por eritrocitos.
-
-### 9.3. Procedimiento
-
-**Paso 1 – Detección de núcleos por color** (`color_stain/wbc_detection.py`, `detectar_wbc`), sin usar el GT:
-1. Se normaliza el color de la imagen con el balance de blancos (Bloque C, C2): cada canal R, G, B se multiplica para que el fondo quede igual a un **fondo de referencia**, que es el promedio del fondo de las 12 imágenes de train (R = 220, G = 181, B = 166). La referencia se guarda en `color_stain/results/referencia_fondo.json` y se usa sin cambios para cualquier imagen nueva (incluido test).
-2. Se marcan los píxeles que son a la vez **violetas** (canal b de Lab < 127) y **oscuros** (canal G < 100).
-3. Se aplica una apertura (disco de radio 3) para borrar puntos sueltos.
-4. Se conservan solo las regiones de **al menos 6.000 píxeles**: un parásito es chico; un núcleo de glóbulo blanco es grande.
-
-El resultado es una máscara con los núcleos de los glóbulos blancos.
-
-**Paso 2 – Eliminación de objetos** (`segmentation/a1_segmentacion_base.py`, `excluir_wbc`): después de Watershed, para cada objeto se calcula qué fracción de sus píxeles cae sobre un núcleo. Si es **al menos el 10 %**, se elimina el objeto entero. Luego se aplica el filtro de área y borde como siempre.
-
-### 9.4. Origen de cada criterio
-
-| Criterio | Valor | Origen |
+| Operación | Valor | Para qué |
 |---|---|---|
-| Violeta | b < 127 | Bloque C (C1): umbral de Youden para separar glóbulos blancos de eritrocitos, píxel a píxel (AUC 0,92), solo train. |
-| Oscuro | G < 100 | Bloque C (C1): el núcleo tiene G ≈ 52 (mediana) y el 95 % de los píxeles de eritrocitos parasitados tiene G > 124. |
-| Tamaño mínimo del núcleo | 6.000 píxeles | Se probaron 3.000, 6.000 y 12.000 con el mismo resultado; se eligió el valor central. |
-| Fracción de núcleo en el objeto | 10 % | En train, los pedazos de glóbulo blanco tenían entre 68 % y 96 % de núcleo y los eritrocitos 0 %; el valor queda lejos de ambos grupos. |
+| Apertura | elipse 5×5 | Borra puntos de ruido y uniones finas entre células. |
+| Cierre | elipse 7×7 | Une pedazos de una misma célula. |
+| Relleno de huecos | huecos ≤ **4.086 px** | Los eritrocitos tienen el **centro más claro** y Otsu los deja como "donas". |
 
-**Por qué se agregó la condición de oscuridad:** la máscara original de C3 usaba solo el criterio violeta (b < 127, regiones de al menos 12.000 píxeles). Aplicada a la segmentación, en las imágenes del paciente 209 (el de tinción más intensa) también marcaba eritrocitos, y se eliminaban **3 células parasitadas y 3 sanas**, lo que haría subestimar la parasitemia. Exigir además que el píxel sea muy oscuro deja marcados solo los núcleos.
+**Criterio del relleno de huecos (desde el GT de train):** se midieron los huecos que caen **dentro de un eritrocito del GT** (centros claros). Su mediana es 773 px, el p95 2.800 y el **p99 4.086**. Se eligió el **p99**, que rellena casi todos los centros sin rellenar el fondo entre células. Con el valor anterior (1.500, elegido a mano) quedaba sin rellenar el 27 % de los centros y el F1 de detección era 0,88 (ahora 0,946).
 
-### 9.5. Resultados (train, Otsu con Watershed)
+**Sensibilidad de los kernels** (se cambia un parámetro por vez, train, `segmentation/sensibilidad_kernels.py`):
 
-| Criterio | Pedazos de glóbulo blanco aceptados | Parasitadas perdidas | Sanas perdidas | F1 de detección |
+| Parámetro | F1 de detección según el valor |
+|---|---|
+| Apertura | 3 → 0,908 · **5 → 0,946** · 7 → 0,946 · 9 → 0,946 |
+| Cierre | 5 → 0,948 · **7 → 0,946** · 9 → 0,938 · 11 → 0,935 |
+| Gaussiano | sin → 0,946 · 3 → 0,946 · **5 → 0,946** · 7 → 0,946 |
+
+Los tres están en una zona estable. Solo empeora la apertura 3, que deja pasar ruido (152 objetos de más contra 59), y el cierre de 9 o más, que pega células. El IoU queda entre 0,821 y 0,823 en todos los casos.
+
+## 6. Separación de células pegadas: Watershed (Bloque A)
+
+- **Problema:** dos eritrocitos que se tocan quedan como un solo objeto. Sin Watershed se perdía alrededor de la mitad de las células (sensibilidad 0,49).
+- **Método:**
+  1. Transformada de distancia: es máxima en el centro de cada célula.
+  2. Máximos locales: son los marcadores, uno por célula.
+  3. Inundación desde cada marcador: el límite entre dos células queda en la "cintura" donde se tocan.
+- **Parámetro automático:** la distancia mínima entre centros es **0,7 × radio típico** de la imagen. El radio es la mediana del máximo de la distancia de cada objeto, sin GT (unos 47 px).
+- **Criterio:** se compararon en train 0,5, 0,7 y 0,9 radios y la variante con h-máximos. 0,7 fue el mejor para K-means y casi igual al mejor para Otsu, o sea el más estable. Los h-máximos cortaban más células y tardaban el doble.
+- **Gradiente (Sobel) como relieve: descartado.** Sobel y Prewitt con gaussiano son los mejores detectores de borde (C2), pero en Watershed bajaron el F1 (0,880 → 0,786). Los bordes entre células pegadas son débiles y los parásitos generan bordes internos.
+
+## 7. Exclusión de glóbulos blancos (Bloque A + C)
+
+- **Problema:** Otsu segmenta los glóbulos blancos y Watershed los corta en pedazos. En train, 3 pedazos pasaban como eritrocitos.
+- **Idea:** el **núcleo** del glóbulo blanco es grande, violeta y muy oscuro; el citoplasma no se distingue por color. Por eso se detecta el núcleo y se elimina el **objeto entero** que lo contiene.
+
+| Criterio | Valor | Origen (solo train) |
+|---|---|---|
+| Violeta | b (Lab) < 127 | Umbral de Youden píxel a píxel, glóbulo blanco contra eritrocito (C1, AUC 0,92). |
+| Oscuro | G < 100 | Núcleo con G ≈ 52; el 95 % de los píxeles de parasitadas tiene G > 124. |
+| Tamaño del núcleo | ≥ 6.000 px | 3.000, 6.000 y 12.000 dan igual; se eligió el central. |
+| Fracción de núcleo en el objeto | ≥ 10 % | Los pedazos de glóbulo blanco tienen entre 68 y 96 %; los eritrocitos, 0 %. |
+
+- **Resultado:** 0 pedazos de glóbulo blanco aceptados y **0 eritrocitos perdidos**.
+- Con "solo violeta", la versión original de C3, se perdían 3 parasitadas del paciente 209, el de tinción más oscura. Por eso se agregó la condición de oscuro.
+- **Limitación:** en train hay solo 10 glóbulos blancos.
+
+## 8. Filtro de área y borde (Bloque A)
+
+- **Área relativa a cada imagen, sin GT:** se aceptan los objetos entre **0,6 y 2,0 veces el área típica** de la imagen.
+  - El área típica es la **mediana ponderada por área**: el objeto en el que se completa la mitad de los píxeles de célula. Da entre 10.000 y 14.600 px en train.
+  - La mediana simple no sirve: con muchos fragmentos chicos, como en el paciente 209, daba unos 2.000 px.
+- **Criterio:** grilla en train (mínimo de 0,3 a 0,8 y máximo de 1,4 a 2,2) con validación dejando un paciente afuera. **Las 6 vueltas eligieron 0,6 – 2,0.** Alrededor de ese valor el F1 casi no cambia: con 0,5–0,6 de mínimo y 1,8–2,2 de máximo da 0,945–0,946; con un mínimo de 0,8 baja a 0,905.
+- **Borde:** se descartan las células que tocan una franja de 3 px del borde del círculo, porque están cortadas. En la evaluación también se sacan del GT, para no contarlas como errores.
+
+## 9. Textura: GLCM (Bloque B)
+
+- Se calcula sobre el **canal G del recorte**, con **32 niveles de gris**, a **distancias 1, 2 y 3 px** y **4 ángulos promediados** (así no depende de la orientación). Solo cuentan los pares de píxeles dentro de la célula.
+- Hay 5 propiedades (contraste, homogeneidad, energía, correlación y entropía) × 3 distancias = 15 atributos.
+- **Selección, sobre las células segmentadas de train:**
+  - ranking por AUC, con el estadístico U de Mann-Whitney y su p-valor;
+  - se descartan los redundantes (|Spearman| ≥ 0,9) y los que separan poco (< 0,6).
+  - **Elegidos:** `contrast_d3` (AUC 0,984, p ≈ 10⁻¹¹²), `entropy_d2` (0,914) y `correlation_d1` (0,884).
+- **Por qué el contraste:** el parásito es una mancha oscura dentro de un citoplasma claro y uniforme, y eso aumenta las diferencias de gris entre píxeles vecinos. El tamaño de la célula **no** separa las clases (AUC 0,52), así que lo que separa es la textura, no el tamaño.
+
+## 10. Color (Bloque C)
+
+- Se calculan **47 atributos de color por célula** (C4) sobre el recorte **normalizado por el fondo**: media, desvío y mediana de G, L, a, b y S; percentiles; fracción de píxeles oscuros o violetas; histogramas; y las manchas de C3.
+- **Máscara de manchas oscuras (C3):** dentro de la célula, achicada 5 px para ignorar el borde, se marcan los píxeles con **G al menos 39 niveles por debajo de la mediana de G de esa célula**. Se cuenta una mancha si tiene **al menos 50 px**. Es relativa a cada célula, así que no depende de la tinción. Los parámetros se eligieron en C3 con validación por paciente, en train.
+- **Criterio de color (C5): "parasitada si tiene al menos una mancha"** (`n_manchas ≥ 1`). Se comparó con 8 reglas de umbrales (1 atributo, AND, OR o mayoría de 3; Youden o máximo F1) con LOPO:
+
+| Regla (LOPO, células del GT de train) | Parasitadas perdidas (de 217) | Precisión | Exactitud bal. media por paciente | F1 peor paciente |
 |---|---:|---:|---:|---:|
-| Sin exclusión | 3 | – | – | 0,8796 |
-| Solo violeta (C3) | 0 | 3 | 3 | 0,8789 |
-| Violeta y oscuro, G < 120 | 0 | 0 – 9 (según el tamaño mínimo) | 1 – 3 | 0,878 – 0,880 |
-| **Violeta y oscuro, G < 100 (elegido)** | **0** | **0** | **0** | **0,8802** |
-| Violeta y oscuro, G < 80 | 0 | 0 | 0 | 0,880 – 0,881 |
+| **Tiene mancha de C3 (elegida)** | **3** | 0,781 | **0,951** | **0,316** |
+| Mayoría de 3 (b_rel_p1, contraste_G_mancha, a_desvio) | 13 | 0,883 | 0,900 | 0,154 |
 
-Con G < 80 o G < 100 y cualquier tamaño mínimo entre 3.000 y 12.000 píxeles, el resultado es el mismo: se eliminan todos los pedazos de glóbulo blanco sin perder eritrocitos. El criterio no depende de un ajuste fino. El IoU y el Dice globales no cambian (0,8016 y 0,8894).
+  **Por qué esta regla:**
+  - **pierde muchas menos parasitadas**, y en malaria es más grave no detectar una infección que marcar de más;
+  - es **más estable entre pacientes**;
+  - es **simple y explicable**: "hay una mancha oscura dentro del eritrocito".
+- **Sobre las células segmentadas (C7):** los atributos de color siguen separando las clases. El AUC cambia ±0,02 respecto de las células del GT.
 
-**Limitación:** en train hay solo 10 glóbulos blancos, por lo que la validación es limitada.
+## 11. Clasificación final: color Y textura (Bloque B + C)
 
-## 10. Ajuste final del relleno de huecos y del filtro de área
+**Regla final: una célula es parasitada si tiene al menos una mancha oscura (color, C5) Y `contrast_d3` ≥ 0,709 (textura).**
 
-Con el pipeline completo (Otsu, limpieza, Watershed y exclusión de glóbulos blancos) se revisaron los dos parámetros que se habían elegido a mano, siguiendo las indicaciones del profesor: criterio explícito a partir de train, independencia de la escala y validación.
+- El umbral de textura es el que **maximiza F1** en las células segmentadas de train.
+- Está guardado en `texture_eval/results/b_metodo_elegido.json`; `main.py` solo lo lee y lo aplica, no recalcula nada.
 
-**Relleno de huecos (criterio a partir del GT de train).** Se midieron los huecos que deja Otsu después de la apertura y el cierre, y se separaron los que caen **dentro de un eritrocito del GT** (centros claros, que hay que rellenar) de los que caen en el fondo. Los centros claros miden: mediana 773, percentil 95 = 2.800 y **percentil 99 = 4.086 píxeles**. Con el valor anterior (1.500) quedaba sin rellenar el 27 % de ellos.
-**Decisión:** `HUECO_MAX` = percentil 99 de los centros claros = **4.086 píxeles**.
+**Criterio de elección:** se compararon 10 estrategias con **LOPO sobre las células segmentadas de train** (las que ve el pipeline real):
 
-**Filtro de área (relativo a cada imagen, sin GT).** En lugar de límites fijos en píxeles, se calcula en cada imagen el **área típica de una célula**, como la mediana de las áreas ponderada por área (el objeto en el que se completa la mitad de los píxeles de célula). La mediana simple no sirve: en las imágenes con muchos fragmentos pequeños (paciente 209) daba unos 2.000 píxeles en lugar de unos 12.000. La ponderada da entre 10.000 y 14.600 píxeles en todas las imágenes de train.
-**Decisión:** aceptar los objetos entre **0,6 y 2,0 veces** el área típica de su imagen.
-
-**Selección y validación (solo train).** Se probaron `HUECO_MAX` = 1.500, 2.800 y 4.086 y factores mínimos de 0,3 a 0,8 y máximos de 1,4 a 2,2, con validación dejando un paciente afuera: en las 6 vueltas se eligió la misma combinación (4.086; 0,6 – 2,0).
-
-| Factor máx. → / mín. ↓ | 1,8 | 2,0 | 2,2 |
+| Estrategia | Precisión | Sensibilidad | F1 LOPO |
 |---|---:|---:|---:|
-| 0,5 | 0,945 | 0,946 | 0,945 |
-| **0,6** | 0,946 | **0,946** | 0,946 |
-| 0,7 | 0,936 | 0,937 | 0,936 |
-| 0,8 | 0,904 | 0,905 | 0,904 |
+| **Color C5 AND textura (elegida)** | **0,891** | 0,824 | **0,856** |
+| Textura sola (contrast_d3) | 0,865 | 0,839 | 0,852 |
+| Logística de textura | 0,832 | 0,844 | 0,838 |
+| Color C5 sola | 0,757 | 0,894 | 0,820 |
+| C5 OR textura | 0,742 | 0,910 | 0,817 |
+| Logística color + textura | 0,872 | 0,754 | 0,809 |
 
-*F1 de detección en train con `HUECO_MAX` = 4.086. El resultado cambia poco alrededor del valor elegido; baja si el mínimo supera 0,6.*
+- **Regla de elección:** se toma la estrategia de mayor F1 LOPO solo si supera a C5 sola por al menos 0,02. Si no, se queda C5, que es más simple. C5 AND textura la supera por 0,036.
+- **Por qué combinar:** el color solo es muy sensible pero marca muchas sanas (por ejemplo, manchas por tinción o superposición). Exigir además una textura alta **baja los falsos positivos a menos de la mitad**, a costa de perder algunas parasitadas.
+- **Para la defensa:** textura sola queda casi empatada (0,852). La combinación gana en precisión y usa las dos fuentes de información, que es lo que proponía el anteproyecto.
 
-**Resultado (train, Otsu):**
+## 12. Parasitemia y máscara final (Bloque C)
 
-| Configuración | IoU | Dice | TP | FP | FN | Precisión | Sensibilidad | F1 |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Anterior (relleno 1.500; área fija 6.000 – 22.000) | 0,802 | 0,889 | 1.911 | 124 | 396 | 0,939 | 0,828 | 0,880 |
-| **Nueva (relleno 4.086; área 0,6 – 2,0 × típica)** | **0,822** | **0,902** | **2.125** | **59** | **182** | **0,973** | **0,921** | **0,946** |
+- **Parasitemia de una imagen** = células clasificadas como parasitadas / total de eritrocitos detectados × 100.
+- **Máscara de eritrocitos parasitados:** la unión de las máscaras de las células parasitadas (célula completa, no solo el parásito). Se guarda una por imagen en `data/shared/pred/parasitadas/mascaras/`, y en `parasitadas/imagenes/` la imagen original mostrando solo esas células.
+- **Comparación con el GT:** se compara el **promedio por imagen** de la parasitemia estimada y de la real, y el **error medio por imagen**. No se compara una parasitemia global (todas las células juntas) con un promedio por imagen, porque se calculan distinto.
 
-El cambio que más aportó fue el relleno de huecos: con el valor anterior, muchas células quedaban como "donas" que Watershed partía en pedazos. Con los mismos cambios, K-means llega a F1 = 0,879 (IoU 0,806) y GMM a F1 = 0,864 (IoU 0,786): **Otsu sigue siendo el mejor método**. La comparación de configuraciones de Otsu (sección 4.4) se repitió con 4.086 y CLAHE + limpieza completa sigue siendo la mejor.
+## 13. Compresión y descompresión JPEG (Bloque C, C6)
 
-## 11. Características de textura (GLCM) - Bloque B
+Cada imagen de train se recomprimió con calidades 95 a 10 y se descomprimió. Después se midieron la calidad de la imagen, el cambio en los atributos de color y el efecto sobre el criterio de color:
 
-Para cada eritrocito se calculan características de textura a partir de la matriz de co-ocurrencia de niveles de gris (GLCM).
+| Calidad | Tamaño (% del original) | PSNR G (dB) | SSIM | ΔE en células | F1 del criterio de color | Células que cambian de decisión |
+|---|---:|---:|---:|---:|---:|---:|
+| original | 100 | — | — | — | 0,906 | 0 |
+| 85 | 34 | 49,2 | 0,982 | 0,7 | 0,904 | 1 |
+| 75 | 22 | 48,0 | 0,983 | 0,9 | 0,908 | 3 |
+| 50 | 16 | 46,1 | 0,974 | 1,4 | 0,910 | 2 |
+| 10 | 13 | 38,3 | 0,952 | 4,6 | 0,912 | 11 |
 
-**Parámetros:**
-- **Canal verde:** es el que mejor contrasta el parásito con el citoplasma del eritrocito en las imágenes teñidas.
-- **32 niveles de gris** (en lugar de 256): simplifica la matriz y reduce el costo de cálculo. Se usa el mismo mapeo para todas las células.
-- **Distancias 1, 2 y 3 píxeles** y **ángulos 0°, 45°, 90° y 135°**: se promedian los cuatro ángulos para cada distancia, para que las características no dependan de la orientación de la célula.
-- **Solo píxeles de la célula:** los píxeles del fondo se asignan a un nivel reservado que después se descarta, para que solo cuenten los pares de píxeles que están ambos dentro de la célula.
-- **Características:** contraste, homogeneidad, energía, correlación y entropía (15 en total: 5 propiedades × 3 distancias).
+**Conclusión:**
+- **Hasta calidad 75** el archivo pasa a ocupar el 22 % y los atributos de color casi no cambian (Spearman > 0,97).
+- **La clasificación es robusta** a la compresión: cambian como mucho 11 de alrededor de 2.350 células.
+- Los atributos más afectados son los de variación fina del color (`a_desvio`, `b_rel_p1`), por el submuestreo de croma de JPEG. Con calidad 10 aparecen los bloques de 8×8.
 
-### 11.1. Selección de atributos
+## 14. Cómo se evalúa
 
-El análisis se hizo sobre los recortes del GT de **train** (217 parasitadas y 2.135 no parasitadas).
+| Qué | Métrica | Detalle |
+|---|---|---|
+| Segmentación (píxeles) | IoU y Dice | Máscara contra GT de eritrocitos, dentro del campo circular; promedio por imagen. |
+| Detección de células | TP, FP, FN, precisión, sensibilidad, F1 | Emparejamiento uno a uno (algoritmo húngaro) con **IoU ≥ 0,5**. Se sacan del GT las células del borde. Los conteos se suman sobre todas las imágenes. |
+| Clasificación | precisión, sensibilidad, especificidad, F1 | Sobre las células detectadas con pareja en el GT: clase predicha contra `clase_gt`. |
+| Parasitemia | estimada contra real | Promedio por imagen y error medio por imagen (puntos porcentuales). |
+| Final en test | detección de parasitadas de punta a punta | Solo las células marcadas como parasitadas contra las parasitadas del GT (IoU ≥ 0,5): mide segmentación y clasificación juntas. |
 
-1. **Capacidad de separación:** para cada característica se calculó el área bajo la curva ROC (AUC) mediante el estadístico U de Mann-Whitney. Un AUC de 0,5 indica que no separa las clases y 1 (o 0) que las separa perfectamente.
-2. **Redundancia:** se calculó la correlación de Spearman entre características. Recorriendo el ranking de mejor a peor, se agregó cada característica solo si su correlación con las ya elegidas era menor a 0,9, y se descartaron las de separación menor a 0,6.
+## 15. Resultados en train
 
-| Característica | AUC | Sentido |
-|---|---:|---|
-| contrast_d3 | 0.991 | mayor en parasitadas |
-| contrast_d2 | 0.987 | mayor en parasitadas |
-| homogeneity_d2 | 0.056 | menor en parasitadas |
-| entropy_d2 | 0.919 | mayor en parasitadas |
-| correlation_d1 | 0.890 | mayor en parasitadas |
-| energy_d1 | 0.137 | menor en parasitadas |
+*Son resultados de desarrollo: los parámetros se eligieron con estos datos. La estimación independiente es la de test.*
 
-**Atributos seleccionados:** `contrast_d3`, `correlation_d1` y `energy_d1`.
+| Etapa | Resultado |
+|---|---|
+| Segmentación | IoU 0,822 · Dice 0,902 |
+| Detección de células | 2.184 detectadas: 2.125 aciertos, 59 de más, 182 sin detectar. Precisión 0,973 · sensibilidad 0,921 · **F1 0,946** |
+| Clasificación (199 parasitadas y 1.926 sanas emparejadas) | Precisión 0,911 · sensibilidad 0,824 · especificidad 0,992 · **F1 0,865** |
+| De punta a punta | De las 217 parasitadas del GT: 18 se pierden en la segmentación y 164 se detectan y clasifican bien (**76 %**) |
+| Parasitemia (promedio por imagen) | Estimada 8,88 % contra real 9,75 % · **error medio 1,3 puntos** por imagen |
 
-Como referencia, el tamaño de la célula (cantidad de píxeles) tiene AUC 0,518: no distingue parasitadas de no parasitadas, por lo que la separación se debe a la textura y no al tamaño.
+F1 de la clasificación por paciente: 208 → 0,88 · 209 → 0,89 · 211 → 0,89 · 212 → 0,75 · **263 → 0,00** · 282 → 0,86.
 
-### 11.2. Umbrales de clasificación
+## 16. Limitaciones
 
-Para cada atributo seleccionado se eligió un umbral sobre la curva ROC de train, con dos criterios:
-- **Youden:** maximiza sensibilidad + especificidad - 1.
-- **F1:** maximiza el equilibrio entre precisión y sensibilidad, más adecuado con clases desbalanceadas (aproximadamente 1 parasitada cada 10 no parasitadas).
+- **Pocas parasitadas por paciente:** tres pacientes de train tienen 4 o 5, y el F1 por paciente es muy ruidoso. En el **paciente 263** el método no acierta ninguna de sus 5. No se corrigió mirando ese resultado, porque sería sobreajustar.
+- **La regla AND prioriza la precisión:** en parasitemias muy bajas puede pasar por alto infecciones leves.
+- **Test tiene solo 2 pacientes:** su resultado va a tener mucha incertidumbre.
+- **La selección de atributos y la elección del método usan todo train**; el LOPO solo reajusta umbrales. Las métricas LOPO son algo optimistas.
+- **Segmentación:** grupos de células muy superpuestas pueden no separarse. Además, la detección no es perfecta (182 eritrocitos sin detectar).
+- **Hay solo 10 glóbulos blancos en train** para validar su exclusión.
 
-| Regla | Sensibilidad | Especificidad | Precisión | F1 |
-|---|---:|---:|---:|---:|
-| contrast_d3 ≥ 0,596 (Youden) | 0.940 | 0.981 | 0.833 | 0.883 |
-| contrast_d3 ≥ 0,698 (F1) | 0.894 | 0.990 | 0.898 | 0.896 |
-| correlation_d1 ≥ 0,944 (Youden) | 0.903 | 0.797 | 0.311 | 0.463 |
-| energy_d1 ≤ 0,418 (Youden) | 0.788 | 0.821 | 0.309 | 0.444 |
+## 17. Cumplimiento de la consigna (temas obligatorios)
 
-Para estimar si el umbral generaliza a pacientes nuevos se hizo una **validación dejando un paciente afuera**: el umbral se calcula con 5 pacientes y se evalúa en el sexto, rotando. Con `contrast_d3` se obtuvo sensibilidad 0,940, precisión 0,533 y F1 0,680: la precisión baja bastante respecto de train, lo que indica que el umbral depende del paciente (diferencias de tinción).
+| Tema de la consigna | Dónde está en el TP |
+|---|---|
+| Contextualización (imágenes y dataset) | Sección 1; `common/verificar_dataset.py`; notebook C1 (tinción y espacios de color) |
+| Mejoramiento de imágenes | CLAHE, filtro gaussiano y normalización de color por el fondo (sección 3) |
+| Reconstrucción | Relleno de huecos (reconstrucción morfológica de los centros claros, sección 5) y reconstrucción de la imagen al descomprimir JPEG (sección 13) |
+| Compresión y descompresión | Experimento JPEG, notebook C6 (sección 13) |
+| Segmentación | Otsu, K-means y GMM; morfología; Watershed (secciones 4 a 8) |
+| Análisis de texturas | GLCM (sección 9) |
+| Resultados: visualización, estadística, comparaciones, significancia | Imágenes de parasitadas; AUC con p-valores de Mann-Whitney e intervalo de confianza por bootstrap; LOPO; tablas de sensibilidad; comparación de métodos (secciones 11 a 15) |
 
-**Limitaciones:**
-- Los atributos y umbrales se obtuvieron con los **polígonos del GT**. Nuestras máscaras segmentadas tienen contornos distintos, por lo que hay que recalcular las características sobre las células segmentadas antes de aplicar los umbrales.
-- Las parasitadas están concentradas en un paciente (209C68P29N tiene 145 de las 217 de train).
-- La selección de atributos se hizo con todo train antes de la validación por paciente, por lo que esa validación puede ser algo optimista.
+## 18. Bibliografía
 
-## 12. Integración de los bloques
+- Walliander, M., et al. (2013). *Automated segmentation of blood cells in Giemsa stained digitized thin blood films*. Diagnostic Pathology, 8(Suppl. 1), S37. https://doi.org/10.1186/1746-1596-8-S1-S37
+- Dataset: NIH-NLM-ThinBloodSmearsPf (Polygon Set), National Library of Medicine.
 
-El archivo `main.py` integra el pipeline completo. Por ahora:
-1. Segmenta cada imagen con el método elegido (Bloque A), separa las células pegadas con Watershed y guarda recortes y máscaras de cada célula.
-2. Calcula las características GLCM de cada célula detectada (Bloque B) y las guarda en `data/shared/features/features_texture_<método>.csv`.
-3. En train, guarda la clase del GT de cada célula detectada (`etiquetas_train.csv`). Se usan los mismos pares célula detectada – célula del GT de la evaluación (IoU ≥ 0,5). De las 2.184 células detectadas en train, 1.926 quedan como sanas, 199 como parasitadas y 59 sin pareja (no son un eritrocito del GT). Con esto se eligen los umbrales del clasificador sobre nuestras células y no sobre los recortes del GT, porque son las que va a recibir el clasificador. Test no se usa.
-
-**Decisiones sobre los formatos compartidos:**
-- **Identificador único de célula (`cell_id`):** `{paciente}_{imagen}_{número de 4 dígitos}`. Permite unir las características de textura y de color de una misma célula.
-- **Recortes de la imagen original:** los recortes se extraen de la imagen RGB original, no de la preprocesada, para que los Bloques B y C trabajen con los colores e intensidades reales.
-- **Resultados separados por método:** cada método guarda en `data/shared/pred/<método>/`, para poder comparar sin sobrescribir.
-- **Máscara de glóbulos blancos:** el Bloque C entrega una máscara booleana del tamaño de la imagen con `True` en los núcleos de los glóbulos blancos; el Bloque A elimina después de Watershed los objetos enteros que contienen un núcleo (sección 9).
-
-## 13. Estrategia general del proyecto
-
-Se definieron dos estrategias posibles para obtener finalmente **máscaras de eritrocitos parasitados completos**.
-
-### Estrategia A: segmentación dirigida por color
-
-Identificar regiones cromáticas compatibles con la presencia de parásitos y, a partir de ellas, delimitar los eritrocitos completos que las contienen.
-
-**Justificación:** aprovechar las diferencias de color asociadas a la infección para orientar la detección.
-
-### Estrategia B: segmentación general y posterior clasificación
-
-1. Segmentar todos los eritrocitos mediante Otsu, K-means o GMM.
-2. Separar y extraer los objetos individuales.
-3. Calcular características de color y textura.
-4. Identificar cuáles corresponden a eritrocitos parasitados.
-
-**Justificación:** separar el problema de localizar las células del problema de determinar si están infectadas.
-
-También se contempla incorporar detección y exclusión de glóbulos blancos mediante características cromáticas y geométricas.
-
-Estas etapas todavía no están implementadas en el pipeline actual.
-
-## 14. Evaluación y próximos pasos
-
-**Estado actual:**
-- Otsu, K-means y GMM implementados, con limpieza morfológica, separación de células mediante Watershed, exclusión de glóbulos blancos, filtrado y extracción de células.
-- Evaluación global (IoU, Dice) y célula a célula (TP, FP, FN, precisión, sensibilidad, F1) sobre train.
-- Características de textura GLCM calculadas y analizadas sobre el GT de train.
-- Pipeline de `main.py` funcionando para segmentación y textura, con la clase del GT de cada célula detectada de train.
-
-**Próximos pasos:**
-1. Confirmar el método de segmentación final (propuesta: Otsu) y revisar el filtro de área después de Watershed.
-2. Inspeccionar visualmente la segmentación sobre imágenes de train.
-3. Recalcular la textura sobre las células segmentadas y desarrollar la identificación de eritrocitos parasitados con características de color y textura.
-4. Evaluar el algoritmo final sobre el **conjunto de test**, una sola vez, manteniendo los parámetros fijos.
-
-La evaluación final deberá distinguir entre la calidad de segmentación de píxeles, la detección de células individuales y la identificación de eritrocitos parasitados.
-
-## 15. Bibliografía de referencia
-
-Walliander, M., et al. (2013). *Automated segmentation of blood cells in Giemsa stained digitized thin blood films*. Diagnostic Pathology, 8(Suppl. 1), S37.
-
-https://doi.org/10.1186/1746-1596-8-S1-S37
-
-*Referencia consignada previamente; verificar los datos bibliográficos antes de la entrega final.*
+*Verificar los datos bibliográficos antes de la entrega final.*

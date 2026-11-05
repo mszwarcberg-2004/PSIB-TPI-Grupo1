@@ -22,7 +22,7 @@ import cv2
 import numpy as np
 import pandas as pd
  
-from common.config import SEED, FEATURES_DIR, rutas_segmentacion
+from common.config import SEED, FEATURES_DIR, PRED_DIR, rutas_segmentacion
 from common.io_utils import cargar_subset, cargar_imagen, cargar_gt, cargar_celula
 from common.generar_gt_utils import mapa_gt
  
@@ -218,10 +218,20 @@ def main(split="train"):
  
     print(f"Imágenes a procesar: {len(imagenes)} | split: {split} | método de segmentación: {METODO}")
  
-    rutas = rutas_segmentacion(METODO)
-    limpiar_resultados_anteriores(rutas)  #borra recortes, máscaras y CSV de la corrida anterior
-    carpeta_parasitadas = rutas["csv"].parent / "parasitadas"  #salida final: una máscara y una imagen por cada foto
-    (carpeta_parasitadas / "mascaras").mkdir(parents=True, exist_ok=True)
+    # Carpetas de salida. Train: pred/otsu/, pred/parasitadas/ y features/ (como siempre).
+    # Test: todo junto en pred/resultados_test/, así la corrida final no pisa ni se mezcla con los resultados de train
+    if split == "test":
+        carpeta_test = PRED_DIR / "resultados_test"
+        rutas = {"crops": carpeta_test / "crops", "masks": carpeta_test / "masks", "csv": carpeta_test / "cells_pred.csv"}
+        carpeta_parasitadas = carpeta_test / "parasitadas"
+        carpeta_features = carpeta_test
+    else:
+        rutas = rutas_segmentacion(METODO)
+        carpeta_parasitadas = PRED_DIR / "parasitadas"  #al lado de otsu/, no adentro
+        carpeta_features = FEATURES_DIR
+
+    limpiar_resultados_anteriores(rutas)  #borra recortes, máscaras y CSV de la corrida anterior (del mismo split)
+    (carpeta_parasitadas / "mascaras").mkdir(parents=True, exist_ok=True)  #salida final: una máscara y una imagen por cada foto
     (carpeta_parasitadas / "imagenes").mkdir(parents=True, exist_ok=True)
 
     celulas_total = []
@@ -285,13 +295,13 @@ def main(split="train"):
     rutas["csv"].parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(celulas_total).to_csv(rutas["csv"], index=False)
  
-    FEATURES_DIR.mkdir(parents=True, exist_ok=True)
-    ruta_textura = FEATURES_DIR / f"features_texture_{METODO}_{split}.csv"   # lleva el split para que test no pise a train
+    carpeta_features.mkdir(parents=True, exist_ok=True)
+    ruta_textura = carpeta_features / f"features_texture_{METODO}_{split}.csv"   # lleva el split para que test no pise a train
     pd.DataFrame(textura_total).to_csv(ruta_textura, index=False)
  
     # Paso 7: color (la referencia de fondo la maneja normalizacion.py; sale de train y test la reutiliza)
     color = pd.DataFrame(color_total)
-    ruta_color = FEATURES_DIR / f"features_color_{METODO}_{split}.csv"
+    ruta_color = carpeta_features / f"features_color_{METODO}_{split}.csv"
     color.to_csv(ruta_color, index=False)
  
     tabla_metricas = pd.DataFrame(metricas_total)
@@ -309,7 +319,7 @@ def main(split="train"):
             decision["metodo"]: {c for c, v in pred_final_total.items() if v},
             "C5 sola": {c for c, v in pred_color_total.items() if v},
         }
-        print(clf.evaluar_test(guardados, marcadas, METODO).round(3))
+        print(clf.evaluar_test(guardados, marcadas, METODO, carpeta=carpeta_test).round(3))  #guarda sus CSV en resultados_test/
  
     # Resumen de detección: IoU y Dice se promedian por imagen; TP, FP y FN se suman (cada célula pesa lo mismo)
     tp, fp, fn = tabla_metricas[["TP", "FP", "FN"]].sum()
