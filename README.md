@@ -1,4 +1,4 @@
-# PSIB-TPI-Grupo1
+# PSIB2026Q2-TPI-Grupo01-Gallardo_Mankevich_Szwarcberg
 
 **Detección de eritrocitos parasitados por malaria en frotis sanguíneos: segmentación de eritrocitos, características de textura y color, clasificación y cálculo de la parasitemia.**
 
