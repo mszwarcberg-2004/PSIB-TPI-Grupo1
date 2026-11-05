@@ -159,8 +159,8 @@ Los tres están en una zona estable. Solo empeora la apertura 3, que deja pasar 
 
 | Criterio | Valor | Origen (solo train) |
 |---|---|---|
-| Violeta | b (Lab) < 127 | Umbral de Youden píxel a píxel, glóbulo blanco contra eritrocito (C1, AUC 0,92). |
-| Oscuro | G < 100 | Núcleo con G ≈ 52; el 95 % de los píxeles de parasitadas tiene G > 124. |
+| Violeta | b (Lab) < 127 | Umbral de Youden píxel a píxel, glóbulo blanco contra eritrocito (C1, AUC 0,92). En OpenCV, b = 128 es el neutro: por debajo el color tira a azul y por encima a amarillo. b < 127 significa "más azul que neutro", como el violeta del núcleo; los eritrocitos, rosados, quedan por encima. |
+| Oscuro | G < 100 | Núcleo con G ≈ 52; el 95 % de los píxeles de parasitadas tiene G > 124. El umbral tiene que quedar entre esos dos valores. Se probaron 80, 100 y 120: con 120, demasiado cerca de 124, se perdían parasitadas; 80 y 100 dieron lo mismo. Se eligió 100 porque deja más margen respecto del núcleo (si en otra imagen sale más claro, se detecta igual) y sigue por debajo de 124. |
 | Tamaño del núcleo | ≥ 6.000 px | 3.000, 6.000 y 12.000 dan igual; se eligió el central. |
 | Fracción de núcleo en el objeto | ≥ 10 % | Los pedazos de glóbulo blanco tienen entre 68 y 96 %; los eritrocitos, 0 %. |
 
