@@ -62,7 +62,7 @@ python predecir.py ruta/a/carpeta/ --salida otra/carpeta
 - Resultados en `data/shared/pred/incognita/`:
   - `resumen.csv`: una fila por imagen, con eritrocitos, parasitados y parasitemia %;
   - una carpeta por imagen con:
-    - `contornos.jpg`: la imagen con cada célula marcada, **rojo = parasitada**, **verde = sana**;
+    - `contornos.jpg`: la imagen con un contorno por célula, **rojo = parasitada**, **verde = sana**;
     - `mascara_parasitadas.png` e `imagen_parasitadas.png`;
     - `celulas.csv`: decisión de cada célula;
     - `crops/` y `masks/`.
@@ -77,7 +77,21 @@ Corre todo sobre las 12 imágenes de **train** (unos 1,5 minutos): segmentación
 
 **Test** se corre una sola vez, al final del trabajo. Hay que poner `EVALUACION_FINAL = True` en `main.py` y ejecutar `main("test")`. Los resultados de test quedan aparte, en `data/shared/pred/resultados_test/`.
 
-### 3.3. Otros scripts (análisis y comparaciones, solo train)
+### 3.3. Figura de resultados
+
+```bash
+python figuras.py train                        # una imagen por paciente de train (después de python main.py)
+python figuras.py test                         # las 4 imágenes de test (después de main("test"))
+python figuras.py incognita ruta/imagen.jpg    # imágenes ya procesadas con predecir.py (o una carpeta)
+```
+
+Arma una figura con una fila por imagen y 4 columnas: **original | máscara de parasitadas | solo las células parasitadas | contornos (rojo = parasitada, verde = sana)**. Debajo del nombre de cada imagen va la parasitemia estimada (y la real, en train y test).
+
+- No corre el pipeline: solo lee los resultados guardados.
+- Guarda la figura como PNG en la carpeta de resultados del modo (`pred/parasitadas/figura_train.png`, `pred/resultados_test/parasitadas/figura_test.png` o `pred/incognita/figura_incognita.png`) y la muestra en pantalla.
+- Con `--no-mostrar` solo la guarda.
+
+### 3.4. Otros scripts (análisis y comparaciones, solo train)
 
 | Comando | Qué hace |
 |---|---|
@@ -153,7 +167,8 @@ data/shared/
 | Archivo / carpeta | Qué es |
 |---|---|
 | `main.py` | **Pipeline completo.** `procesar_imagen` aplica todos los pasos a una imagen **sin usar el GT**; `evaluar_contra_gt` mide el resultado contra el GT; `main(split)` recorre las imágenes de train (o de test, al final), guarda los resultados e imprime el resumen. |
-| `predecir.py` | **Casos incógnita:** aplica `procesar_imagen` de `main.py` a imágenes nuevas, sin GT, y guarda los resultados aparte. |
+| `predecir.py` | **Casos incógnita:** aplica `procesar_imagen` de `main.py` a imágenes nuevas, sin GT, y guarda los resultados aparte. También tiene `dibujar_contornos` (un contorno por célula, rojo = parasitada, verde = sana), que usa `figuras.py`. |
+| `figuras.py` | **Figura de resultados** (original, máscara de parasitadas, solo parasitadas y contornos) para train, test o casos incógnita. Solo lee resultados guardados. |
 | `README.md` | Este archivo: instalación, ejecución y organización del repositorio. |
 | `report.md` | **Criterios y decisiones** de cada paso del pipeline, con su justificación y resultados. |
 | `requirements.txt` | Librerías y versiones exactas. |
@@ -250,4 +265,3 @@ data/shared/
 ## Pendientes
 
 - Evaluación final sobre test, una única vez.
-- Figuras para el informe.

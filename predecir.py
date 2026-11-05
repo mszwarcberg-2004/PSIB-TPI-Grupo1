@@ -37,14 +37,24 @@ def listar_imagenes(rutas):
     return imagenes
 
 
-#Imagen con el contorno de cada célula detectada: verde = sana, rojo = parasitada (para mirar el resultado de un vistazo)
-def dibujar_contornos(imagen_rgb, etiquetas, mascara_parasitadas):
-    salida = cv2.cvtColor(imagen_rgb, cv2.COLOR_RGB2BGR)
-    sanas = ((etiquetas > 0) & ~mascara_parasitadas).astype(np.uint8)
-    parasitadas = mascara_parasitadas.astype(np.uint8)
-    for mascara, color in [(sanas, (0, 200, 0)), (parasitadas, (0, 0, 255))]:  #colores en BGR
-        contornos, _ = cv2.findContours(mascara, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        cv2.drawContours(salida, contornos, -1, color, 6)
+ROJO, VERDE = (255, 0, 0), (0, 200, 0)  #colores de los contornos, en RGB
+GROSOR_CONTORNO = 8                     #grosor del contorno, en píxeles de la imagen original
+
+
+#Dibuja el contorno de CADA célula detectada, una por una: rojo si se clasificó como parasitada, verde si no.
+#celulas: tabla con cell_id, bbox_x, bbox_y y la columna "parasitada" (True/False).
+#carpeta_masks: carpeta con la máscara de cada célula (masks/{cell_id}.png), que se ubica en la imagen con su bbox.
+#Como cada célula usa su propia máscara, dos células pegadas quedan con dos contornos separados.
+#La usan predecir.py (contornos.jpg) y figuras.py (última columna de la figura). Devuelve la imagen en RGB.
+def dibujar_contornos(imagen_rgb, celulas, carpeta_masks):
+    salida = imagen_rgb.copy()
+    for _, c in celulas.iterrows():
+        mascara = cv2.imread(str(Path(carpeta_masks) / f"{c['cell_id']}.png"), cv2.IMREAD_GRAYSCALE)
+        if mascara is None:
+            continue
+        contornos, _ = cv2.findContours((mascara > 0).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        color = ROJO if c["parasitada"] else VERDE
+        cv2.drawContours(salida, contornos, -1, color, GROSOR_CONTORNO, offset=(int(c["bbox_x"]), int(c["bbox_y"])))
     return salida
 
 
@@ -85,8 +95,8 @@ def predecir(rutas_entrada, carpeta_salida=CARPETA_SALIDA):
         cv2.imwrite(str(carpeta / "mascara_parasitadas.png"), mascara_par.astype(np.uint8) * 255)
         cv2.imwrite(str(carpeta / "imagen_parasitadas.png"),
                     cv2.cvtColor(imagen_rgb * mascara_par[..., None].astype(np.uint8), cv2.COLOR_RGB2BGR))
-        cv2.imwrite(str(carpeta / "contornos.jpg"), dibujar_contornos(imagen_rgb, resultado["etiquetas"], mascara_par),
-                    [cv2.IMWRITE_JPEG_QUALITY, 90])
+        contornos = dibujar_contornos(imagen_rgb, celulas, rutas["masks"]) if len(celulas) else imagen_rgb
+        cv2.imwrite(str(carpeta / "contornos.jpg"), cv2.cvtColor(contornos, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 90])
 
         n_par = int(celulas["parasitada"].sum()) if len(celulas) else 0
         resumen.append({"imagen": ruta.name, "eritrocitos": len(celulas), "parasitados": n_par,

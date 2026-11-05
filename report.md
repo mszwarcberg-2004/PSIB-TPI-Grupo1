@@ -49,6 +49,14 @@ Imagen RGB
 | Evaluación final (test) | `main("test")` con `EVALUACION_FINAL = True` | Una única vez, con todo fijo. Resultados en `pred/resultados_test/`. |
 | **Casos incógnita** | `python predecir.py <imagen o carpeta>` | Imágenes nuevas **sin GT** (las que traiga la cátedra). Devuelve la parasitemia, la máscara de parasitadas y una imagen con cada célula marcada (rojo = parasitada, verde = sana). Resultados en `pred/incognita/`. |
 
+**Visualización:** `python figuras.py train | test | incognita` arma, con los resultados ya guardados, una figura con una fila por imagen y 4 columnas:
+1. original;
+2. máscara de parasitadas;
+3. solo las células parasitadas;
+4. contornos: **un contorno por célula**, rojo si se clasificó como parasitada y verde si no.
+
+No vuelve a correr el pipeline. La función de contornos está una sola vez, en `predecir.py`, y la usan los dos scripts.
+
 `predecir.py` se comprobó con imágenes de train tratadas como incógnitas: da exactamente la misma parasitemia que `main.py` para esas imágenes.
 
 ## 3. Preprocesamiento (Bloque A y C)
@@ -309,6 +317,7 @@ F1 de la clasificación por paciente: 208 → 0,88 · 209 → 0,89 · 211 → 0,
 - **Test tiene solo 2 pacientes:** su resultado va a tener mucha incertidumbre.
 - **La selección de atributos y la elección del método usan todo train**; el LOPO solo reajusta umbrales. Las métricas LOPO son algo optimistas.
 - **Segmentación:** grupos de células muy superpuestas pueden no separarse. Además, la detección no es perfecta (182 eritrocitos sin detectar).
+- **Parásitos en el borde de la célula:** cuando el parásito está justo en el borde del eritrocito, la segmentación a veces lo deja **afuera de la máscara** de la célula, que queda con forma de "C". La mancha oscura no entra en la célula, así que se clasifica como sana. Se ve en las imágenes de contornos (células verdes con un punto violeta pegado en el hueco) y explica parte de las parasitadas que se pierden. Una posible mejora sería un cierre más grande o rellenar la concavidad de cada célula (envolvente convexa) antes de clasificar. No se aplicó para no cambiar el pipeline ya validado.
 - **Hay solo 10 glóbulos blancos en train** para validar su exclusión.
 
 ## 17. Cumplimiento de la consigna (temas obligatorios)
@@ -321,7 +330,7 @@ F1 de la clasificación por paciente: 208 → 0,88 · 209 → 0,89 · 211 → 0,
 | Compresión y descompresión | Experimento JPEG, notebook C6 (sección 13) |
 | Segmentación | Otsu, K-means y GMM; morfología; Watershed (secciones 4 a 8) |
 | Análisis de texturas | GLCM (sección 9) |
-| Resultados: visualización, estadística, comparaciones, significancia | Imágenes de parasitadas y de contornos (rojo = parasitada, verde = sana); AUC con p-valores de Mann-Whitney e intervalo de confianza por bootstrap; LOPO; tablas de sensibilidad; comparación de métodos (secciones 11 a 15) |
+| Resultados: visualización, estadística, comparaciones, significancia | Figura de resultados (`figuras.py`: original, máscara, parasitadas y contornos por célula); AUC con p-valores de Mann-Whitney e intervalo de confianza por bootstrap; LOPO; tablas de sensibilidad; comparación de métodos (secciones 11 a 15) |
 | Entrega del modelo, evaluado por la cátedra con casos incógnita | `predecir.py`: aplica el pipeline a imágenes nuevas sin GT (sección 2) |
 
 ## 18. Bibliografía
