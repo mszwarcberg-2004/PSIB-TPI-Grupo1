@@ -49,7 +49,7 @@ Imagen RGB
 | Evaluación final (test) | `main("test")` con `EVALUACION_FINAL = True` | Una única vez, con todo fijo. Resultados en `pred/resultados_test/`. |
 | **Casos incógnita** | `python predecir.py <imagen o carpeta>` | Imágenes nuevas **sin GT** (las que traiga la cátedra). Devuelve la parasitemia, la máscara de parasitadas y una imagen con cada célula marcada (rojo = parasitada, verde = sana). Resultados en `pred/incognita/`. |
 
-**Visualización:** `python figuras.py train | test | incognita` arma, con los resultados ya guardados, una figura con una fila por imagen y 4 columnas:
+**Visualización:** `python figuras.py train | test | incognita` arma, con los resultados ya guardados, **una figura por paciente** (sus 2 imágenes; al cerrarla aparece la siguiente), con una fila por imagen y 4 columnas:
 1. original;
 2. máscara de parasitadas;
 3. solo las células parasitadas;
@@ -189,7 +189,7 @@ Primero se hizo con las células **del GT** (contornos perfectos, para explorar)
 
   **Conclusión:** lo que separa **no es el color promedio**, sino **lo local**: un punto más oscuro o más violeta que el resto de la misma célula. El parásito no cambia el color de toda la célula, le agrega una mancha. Por eso los desvíos separan mucho mejor que las medias.
   **Seleccionados** (sin redundancia, |ρ| < 0,8): `b_rel_p1`, `contraste_G_mancha`, `a_desvio`, `G_hist_0`, `frac_violeta`, `b_desvio`, `b_hist_2` y `a_p95`.
-- **Máscara de manchas oscuras (C3):** dentro de la célula, achicada 5 px para ignorar el borde, se marcan los píxeles con **G al menos 39 niveles por debajo de la mediana de G de esa célula**. Se cuenta una mancha si tiene **al menos 50 px**. Es relativa a cada célula, así que no depende de la tinción. Los parámetros se eligieron en C3 con validación por paciente, en train.
+- **Máscara de manchas oscuras (C3):** dentro de la célula, achicada 5 px para ignorar el borde, se marcan los píxeles con **G al menos 39 niveles por debajo de la mediana de G de esa célula**. Se cuenta una mancha si tiene **al menos 50 px**. Es relativa a cada célula, así que depende menos de la tinción, aunque con otra tinción pueden aparecer puntos oscuros que no son parásitos (ver sección 16). Los parámetros se eligieron en C3 con validación por paciente, en train.
 - **Criterio de color (C5): "parasitada si tiene al menos una mancha"** (`n_manchas ≥ 1`). Se comparó con 8 reglas de umbrales (1 atributo, AND, OR o mayoría de 3; Youden o máximo F1) con LOPO:
 
 | Regla (LOPO, células del GT de train) | Parasitadas perdidas (de 217) | Precisión | Exactitud bal. media por paciente | F1 peor paciente |
@@ -310,11 +310,58 @@ Cada imagen de train se recomprimió con calidades 95 a 10 y se descomprimió. D
 
 F1 de la clasificación por paciente: 208 → 0,88 · 209 → 0,89 · 211 → 0,89 · 212 → 0,75 · **263 → 0,00** · 282 → 0,86.
 
+## 15b. Resultados en test (evaluación final, una única vez)
+
+Test se corrió **una sola vez**, con todos los parámetros fijos. La versión del código quedó marcada en git con la etiqueta `evaluacion-final`, y después **no se cambió nada**. Son 4 imágenes de 2 pacientes:
+- **231C89P50:** 23 eritrocitos parasitados;
+- **305C212:** **ninguno**, es un paciente sano.
+
+Lo que se imprimió quedó guardado en `data/shared/pred/resultados_test/resumen_test.txt`, y las figuras en `resultados_test/parasitadas/figura_test_<paciente>.png`.
+
+### Comparación train – test
+
+Entre corchetes, el intervalo de confianza del 95 % (Wilson).
+
+| Etapa | Train | **Test** |
+|---|---|---|
+| Segmentación (IoU / Dice) | 0,822 / 0,902 | **0,821 / 0,902** |
+| Detección de células (F1) | 0,946 (P 0,973 · S 0,921) | **0,963** (P 0,976 · S 0,950 [0,93–0,96]) |
+| Clasificación, color Y textura (F1) | 0,865 (P 0,911 · S 0,824) | **0,791** (P 0,739 [0,54–0,87] · S 0,850 [0,64–0,95]) |
+| Clasificación, solo color (F1, referencia) | 0,832 (P 0,777 · S 0,894) | 0,690 (P 0,526 · S 1,000) |
+| Especificidad de la clasificación | 0,992 | **0,993** |
+| De punta a punta: parasitadas del GT bien encontradas | 164 / 217 (76 %) | **17 / 23 (74 %)** [0,54–0,87] |
+| Parasitemia: error medio por imagen | 1,33 puntos | **0,85 puntos** |
+
+### Por imagen
+
+| Imagen | Paciente | Parasitemia estimada | Parasitemia real | Sanas marcadas como parasitadas | Parasitadas que se pasaron |
+|---|---|---:|---:|---:|---:|
+| 162300 | 231 | 3,6 % | 3,8 % | 0 | 1 |
+| 162504 | 231 | 6,2 % | 7,4 % | 0 | 2 |
+| 105834 | 305 (sano) | 1,4 % | 0,0 % | 4 | – |
+| 110230 | 305 (sano) | 0,7 % | 0,0 % | 2 | – |
+
+De las 23 parasitadas de test: **3 se pierden en la segmentación** (no quedan como célula detectada), **3 se clasifican como sanas** y **17 se detectan bien**.
+
+### Análisis
+
+1. **La segmentación generaliza muy bien:** el IoU es el mismo que en train y la detección incluso mejora (F1 0,963). Los parámetros relativos a cada imagen (radio y área típicos) funcionan en pacientes nuevos.
+2. **La clasificación baja respecto de train (F1 0,865 → 0,791), pero sigue siendo buena**, y la causa es clara:
+   - en el **paciente infectado (231)** el método **no marca ninguna sana como parasitada** (precisión 1,0) y detecta 17 de 20 parasitadas segmentadas. Su F1 es 0,919;
+   - **todos los falsos positivos (6) están en el paciente sano (305)**. Sus imágenes tienen una **tinción muy distinta a la de train**: gris azulada y pálida, contra rosada (ver la figura). Con otra tinción aparecen manchas oscuras que no son parásitos (por ejemplo, plaquetas o restos apoyados sobre un eritrocito).
+3. **El F1 de 0,000 del paciente 305 no significa que falló todo:** ese paciente no tiene parasitadas, así que el F1 no está definido. Lo que importa es que marcó **6 de 566 eritrocitos (1 %)**, y la parasitemia estimada fue 1,4 % y 0,7 % en vez de 0 %.
+4. **Test confirma la decisión de combinar color y textura.** Con solo color, el paciente sano habría tenido el triple de falsos positivos (18 en total contra 6) y el F1 caería a 0,690. La textura vuelve a eliminar la mayoría de los falsos positivos, igual que en train.
+5. **La parasitemia se estima bien:** error medio de 0,85 puntos por imagen. En el paciente infectado queda a menos de 1,2 puntos de la real.
+6. **Incertidumbre:** con 23 parasitadas, los intervalos de confianza son anchos. Por ejemplo, la sensibilidad de punta a punta (74 %) podría estar entre 54 % y 87 %. Por eso test se toma como **una confirmación de que el método generaliza**, no como una medida exacta.
+
+**Implicancia clínica:** el sistema es útil para **estimar la parasitemia** en un paciente infectado, pero en un paciente sano con una tinción distinta puede dar una parasitemia baja (alrededor del 1 %) que no existe. Un resultado de ese orden debería confirmarse visualmente; la imagen de contornos sirve justamente para eso.
+
 ## 16. Limitaciones
 
 - **Pocas parasitadas por paciente:** tres pacientes de train tienen 4 o 5, y el F1 por paciente es muy ruidoso. En el **paciente 263** el método no acierta ninguna de sus 5. No se corrigió mirando ese resultado, porque sería sobreajustar.
 - **La regla AND prioriza la precisión:** en parasitemias muy bajas puede pasar por alto infecciones leves.
-- **Test tiene solo 2 pacientes:** su resultado va a tener mucha incertidumbre.
+- **Test tiene solo 2 pacientes y 23 parasitadas:** los intervalos de confianza son anchos (sección 15b).
+- **Sensibilidad a la tinción:** en test, un paciente con una tinción muy distinta a la de train (gris azulada) concentró todos los falsos positivos. La normalización por el fondo corrige el brillo y el balance de color, pero no un cambio de tinción tan grande. La parte más sensible es la textura: el contraste se calcula sobre el canal verde sin normalizar y se compara con un umbral fijo (0,709), así que si la tinción cambia el contraste de las células, el umbral puede dejar de ser adecuado. La regla de la mancha es relativa a cada célula, pero con otra tinción aparecen puntos oscuros (plaquetas, restos) que cuenta como manchas. Train tenía solo 6 pacientes, todos con tinción parecida. Una mejora sería entrenar con más variedad de tinciones o usar una normalización de tinción más completa.
 - **La selección de atributos y la elección del método usan todo train**; el LOPO solo reajusta umbrales. Las métricas LOPO son algo optimistas.
 - **Segmentación:** grupos de células muy superpuestas pueden no separarse. Además, la detección no es perfecta (182 eritrocitos sin detectar).
 - **Parásitos en el borde de la célula:** cuando el parásito está justo en el borde del eritrocito, la segmentación a veces lo deja **afuera de la máscara** de la célula, que queda con forma de "C". La mancha oscura no entra en la célula, así que se clasifica como sana. Se ve en las imágenes de contornos (células verdes con un punto violeta pegado en el hueco) y explica parte de las parasitadas que se pierden. Una posible mejora sería un cierre más grande o rellenar la concavidad de cada célula (envolvente convexa) antes de clasificar. No se aplicó para no cambiar el pipeline ya validado.
