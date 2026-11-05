@@ -10,7 +10,7 @@ El algoritmo recibe una imagen de microscopio de un frotis fino teñido con Giem
 
 Los resultados se comparan con las anotaciones del Ground Truth (GT) del dataset.
 
-**Criterios y decisiones de cada paso:** [`report.md`](report.md). El registro completo de pruebas está en [`docs/report_detallado.md`](docs/report_detallado.md).
+**Criterios y decisiones de cada paso:** [`report.md`](report.md). Las tablas de las pruebas intermedias están en su Anexo A.
 
 | Bloque | Carpeta | Contenido |
 |---|---|---|
@@ -22,7 +22,7 @@ Los resultados se comparan con las anotaciones del Ground Truth (GT) del dataset
 
 Primero hay que instalar las dependencias (sección 2). Después, **desde la carpeta principal del repositorio** y con el entorno activado, copiar y pegar en la terminal **en este orden**.
 
-Los resultados no están en GitHub: se generan al correr estos comandos.
+Los resultados se generan al correr estos comandos. De test, ya están en GitHub el resumen, las métricas y las figuras de la única corrida (`data/shared/pred/resultados_test/`), para poder verlos sin correr nada.
 
 **1. Resultados de train** (12 imágenes, unos 1,5 minutos). Imprime el resumen de métricas al final:
 
@@ -175,7 +175,7 @@ cargar la imagen (RGB original)
 
 ## 5. Resultados que se generan
 
-Los resultados **no se suben a GitHub** (están en el `.gitignore`): se generan al correr los scripts.
+Los resultados **no se suben a GitHub** (están en el `.gitignore`): se generan al correr los scripts. La excepción es test: se subieron `resumen_test.txt`, `metricas_test.csv`, `etiquetas_test.csv`, los dos `b6_pred_otsu_test_*.csv` y las dos figuras por paciente, como registro de la única corrida.
 
 ```text
 data/shared/
@@ -224,7 +224,6 @@ data/shared/
 | `requirements.txt` | Librerías y versiones exactas. |
 | `.gitignore` | Archivos que no se suben: entorno virtual, cachés y resultados generados (`data/shared/pred/`, `data/shared/features/`). |
 | `.vscode/settings.json` | Configuración de VS Code para ejecutar `common.verificar_dataset` desde el editor. |
-| `docs/report_detallado.md` | Registro completo, en orden cronológico, de todas las pruebas del Bloque A (versión anterior del report). |
 
 ### `common/`: funciones compartidas por los tres bloques
 
@@ -304,7 +303,7 @@ data/shared/
 | `raw/<paciente>/Img/*.jpg` y `raw/<paciente>/GT/*.txt` | Imágenes originales y anotaciones del GT (no se modifican). En los pacientes 208 y 209 la carpeta se llama `Gt`; el código contempla los dos nombres. |
 | `shared/subset.csv` | Las 16 imágenes seleccionadas y su división train/test. |
 | `shared/gt_check/` | Imágenes con los polígonos del GT dibujados (las genera `visualizar_gt.py`). |
-| `shared/pred/` y `shared/features/` | Resultados generados (sección 5); no se suben a GitHub. |
+| `shared/pred/` y `shared/features/` | Resultados generados (sección 5); no se suben a GitHub, salvo el resumen y las figuras de test. |
 
 ## 7. Organización del trabajo
 
