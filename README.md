@@ -313,4 +313,4 @@ data/shared/
 
 ## Evaluación final (test)
 
-Ya se corrió **una única vez**, con la versión marcada en git como `evaluacion-final`. Resultados y análisis en la sección 15b de [`report.md`](report.md): IoU 0,821 · detección F1 0,963 · clasificación F1 0,791 · error de parasitemia de 0,85 puntos por imagen.
+Ya se corrió **una única vez**, con la versión marcada en git como `evaluacion-final`. Resultados y análisis en la sección 15b de [`report.md`](report.md): IoU 0,821 · detección F1 0,963 · clasificación F1 0,791 · detección final de parasitadas F1 0,708 · parasitemia: error de 0,66 puntos por imagen en el paciente infectado y parasitemia falsa de alrededor del 1 % en el paciente sano.

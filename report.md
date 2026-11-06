@@ -137,7 +137,7 @@ Los tres están en una zona estable. Solo empeora la apertura 3, que deja pasar 
 
 ## 6. Separación de células pegadas: Watershed (Bloque A)
 
-- **Problema:** sin Watershed, cada región blanca conectada (conectividad 8) se toma como una célula, así que dos eritrocitos que se tocan quedan como un solo objeto. Ese objeto es demasiado grande y el filtro de área lo descarta, o se acepta pero no coincide con ninguna célula del GT. Así se perdía alrededor de la mitad de las células (sensibilidad 0,49).
+- **Problema:** sin Watershed, cada región blanca conectada (conectividad 8) se toma como una célula, así que dos eritrocitos que se tocan quedan como un solo objeto. Ese objeto es demasiado grande y el filtro de área lo descarta, o se acepta pero no coincide con ninguna célula del GT. Así se perdía alrededor de la mitad de las células (recall 0,49).
 - **Etiquetado en dos pasos:**
   1. **Etiquetado de componentes conectadas (*merge labeling*, conectividad 8)** (`label` de scikit-image): le da un número a cada región conectada de la máscara. Recorre la imagen en dos pasadas: en la primera pone etiquetas provisorias y anota cuáles son equivalentes, y en la segunda las unifica. Conectividad 8 (vecinos por lado o por diagonal) para que un contorno fino en diagonal no parta una célula en pedazos. Las células pegadas quedan con el mismo número, así que en el pipeline final este paso **solo sirve para que Watershed busque al menos un centro dentro de cada objeto**.
   2. **Watershed hace el etiquetado final:** cada eritrocito queda con su propia etiqueta, aunque esté pegado a otro. Todo lo que sigue (filtro de área, recortes, máscaras, textura, color y evaluación) usa estas etiquetas.
@@ -150,7 +150,7 @@ Los tres están en una zona estable. Solo empeora la apertura 3, que deja pasar 
   - Al ser relativo al radio, el parámetro se adapta a cada imagen y no depende del GT.
 - **Criterio:** se compararon en train 0,5, 0,7 y 0,9 radios. Es el rango útil: con menos de medio radio una misma célula puede quedar con dos máximos y cortarse en pedazos; con un radio o más, dos células superpuestas no se separan. Con Otsu los tres dieron casi el mismo F1 (0,875 a 0,881), así que el resultado no depende mucho de este valor. 0,7 fue el mejor para K-means y casi igual al mejor para Otsu, o sea el más estable.
 
-| Distancia mínima | Otsu: precisión | Otsu: sensibilidad | Otsu: F1 | K-means: F1 |
+| Distancia mínima | Otsu: precisión | Otsu: recall | Otsu: F1 | K-means: F1 |
 |---|---:|---:|---:|---:|
 | Sin Watershed | 0,952 | 0,485 | 0,643 | 0,492 |
 | 0,5 × radio | 0,934 | 0,834 | 0,881 | 0,816 |
@@ -292,7 +292,7 @@ Es como estudiar con ejercicios que tienen las respuestas (train) para aprender 
 
 **Criterio de elección:** se compararon 10 estrategias con **LOPO sobre las células segmentadas de train** (las que ve el pipeline real):
 
-| Estrategia | Precisión | Sensibilidad | F1 LOPO |
+| Estrategia | Precisión | Recall | F1 LOPO |
 |---|---:|---:|---:|
 | **Color C5 AND textura (elegida)** | **0,891** | 0,824 | **0,856** |
 | Textura sola (contrast_d3) | 0,865 | 0,839 | 0,852 |
@@ -302,14 +302,19 @@ Es como estudiar con ejercicios que tienen las respuestas (train) para aprender 
 | Logística color + textura | 0,872 | 0,754 | 0,809 |
 
 - **Regla de elección:** se toma la estrategia de mayor F1 LOPO solo si supera a C5 sola por al menos 0,02. Si no, se queda C5, que es más simple. C5 AND textura la supera por 0,036.
-- **Por qué combinar:** el color solo es muy sensible pero marca muchas sanas (por ejemplo, manchas por tinción o superposición). Exigir además una textura alta **baja los falsos positivos a menos de la mitad**, a costa de perder algunas parasitadas.
+- **Por qué combinar:** el color solo tiene un recall alto pero marca muchas sanas (por ejemplo, manchas por tinción o superposición). Exigir además una textura alta **baja los falsos positivos a menos de la mitad**, a costa de perder algunas parasitadas.
 - **Para la defensa:** textura sola queda casi empatada (0,852). La combinación gana en precisión y usa las dos fuentes de información, que es lo que proponía el anteproyecto.
 
 ## 12. Parasitemia y máscara final (Bloque C)
 
 - **Parasitemia de una imagen** = células clasificadas como parasitadas / total de eritrocitos detectados × 100.
 - **Máscara de eritrocitos parasitados:** la unión de las máscaras de las células parasitadas (célula completa, no solo el parásito). Se guarda una por imagen en `data/shared/pred/parasitadas/mascaras/`, y en `parasitadas/imagenes/` la imagen original mostrando solo esas células.
-- **Comparación con el GT:** se compara el **promedio por imagen** de la parasitemia estimada y de la real, y el **error medio por imagen**. No se compara una parasitemia global (todas las células juntas) con un promedio por imagen, porque se calculan distinto.
+- **Parasitemia real de una imagen** = parasitadas del GT / eritrocitos del GT × 100, sin glóbulos blancos y sin las células del borde (el mismo criterio que el algoritmo).
+- **Cómo se reporta:**
+  - **Por imagen y por paciente**, estimada contra real. Es la comparación con sentido clínico: la parasitemia es de una muestra.
+  - **Error absoluto medio por imagen (MAE):** promedio de |estimada − real|, en puntos porcentuales. Es el resumen principal: no se compensa entre imágenes.
+  - **Pacientes sanos aparte:** en un sano lo que importa es si da 0 %. Cualquier valor mayor es una **parasitemia falsa**.
+- **Por qué no se usa el promedio de parasitemia como resultado:** mezclar pacientes infectados y sanos da un número que no describe a ningún paciente (por ejemplo, el promedio de 7 % y 0 % es 3,5 %), y los errores de signo contrario se compensan. Tampoco se compara una parasitemia global (todas las células juntas) con una por imagen, porque se calculan distinto.
 
 ## 13. Compresión y descompresión JPEG (Bloque C, C6)
 
@@ -333,10 +338,18 @@ Cada imagen de train se recomprimió con calidades 95 a 10 y se descomprimió. D
 | Qué | Métrica | Detalle |
 |---|---|---|
 | Segmentación (píxeles) | IoU y Dice | Máscara contra GT de eritrocitos, dentro del campo circular; promedio por imagen. |
-| Detección de células | TP, FP, FN, precisión, sensibilidad, F1 | Una célula segmentada está **bien detectada (TP)** si tiene **IoU ≥ 0,5** con una célula del GT. Las segmentadas sin pareja son FP y las del GT sin pareja, FN. Se sacan del GT las células del borde. Los conteos se suman sobre todas las imágenes. |
-| Clasificación | precisión, sensibilidad, especificidad, F1 | Sobre las células detectadas con pareja en el GT: clase predicha contra `clase_gt`. |
-| Parasitemia | estimada contra real | Promedio por imagen y error medio por imagen (puntos porcentuales). |
-| Detección final de células parasitadas | TP, FP, FN, precisión, sensibilidad, F1 | De punta a punta: **todas** las células que el sistema marcó como parasitadas contra **todas** las parasitadas del GT (IoU ≥ 0,5). Suma los errores de las dos etapas: FN = parasitadas que no se segmentaron o que se clasificaron como sanas; FP = sanas marcadas y objetos que no son ninguna parasitada. Se calcula en train y en test. |
+| Detección de células | TP, FP, FN, precisión, recall, F1 | Una célula segmentada está **bien detectada (TP)** si tiene **IoU ≥ 0,5** con una célula del GT. Las segmentadas sin pareja son FP y las del GT sin pareja, FN. Se sacan del GT las células del borde. Los conteos se suman sobre todas las imágenes. |
+| Clasificación | precisión, recall, especificidad, F1 | Sobre las células detectadas con pareja en el GT: clase predicha contra `clase_gt`. |
+| Parasitemia | estimada contra real, por imagen | Error absoluto medio por imagen (MAE), en puntos porcentuales. Los pacientes sanos se informan aparte (parasitemia falsa). |
+| Detección final de células parasitadas | TP, FP, FN, precisión, recall, F1 | De punta a punta: **todas** las células que el sistema marcó como parasitadas contra **todas** las parasitadas del GT (IoU ≥ 0,5). Suma los errores de las dos etapas: FN = parasitadas que no se segmentaron o que se clasificaron como sanas; FP = sanas marcadas y objetos que no son ninguna parasitada. Se calcula en train y en test. |
+
+**Métricas que se priorizan: recall y F1.** (Recall es lo que en castellano se llama sensibilidad.) Es lo que imprime `main.py` y lo que se informa como resultado principal.
+- **Recall = TP / (TP + FN):** de las células parasitadas, cuántas se detectaron. Es la más importante desde el punto de vista clínico: **dejar pasar una célula parasitada como sana** subestima la parasitemia y, en el extremo, puede hacer que una infección pase inadvertida, que es el error más grave en malaria.
+- **F1:** combina recall y precisión en un solo número. Es la métrica principal porque:
+  - las clases están muy desbalanceadas (alrededor de 1 parasitada cada 13 sanas). Una métrica como la exactitud daría alta aunque se perdieran casi todas las parasitadas;
+  - para estimar bien la parasitemia no alcanza con encontrar las parasitadas: tampoco hay que marcar sanas de más, porque inflan el porcentaje. F1 obliga a cuidar las dos cosas.
+- **La precisión no desaparece:** los conteos TP, FP y FN se informan siempre, y la precisión se muestra donde explica una decisión. Por ejemplo, es lo que justifica elegir color Y textura frente a solo color (sección 11.3) y lo que muestra el problema del paciente sano de test (sección 15b).
+- **Aclaración para la defensa:** que el recall sea la métrica clínica más importante no significa que se haya elegido la regla con el recall más alto. "Solo color" tiene más recall (0,894 contra 0,824), pero marca más del triple de sanas como parasitadas (51 contra 16 en train). Se eligió la regla con **mejor F1**, que es el mejor equilibrio para estimar la parasitemia.
 
 **Diferencia entre clasificación y detección final:** la clasificación mide **solo el clasificador**, con las células que la segmentación encontró bien. La detección final mide **el sistema completo**, que es lo que le importa a quien lo usa. Por eso da un poco más bajo.
 
@@ -353,10 +366,10 @@ Cada imagen de train se recomprimió con calidades 95 a 10 y se descomprimió. D
 | Etapa | Resultado |
 |---|---|
 | Segmentación | IoU 0,822 · Dice 0,902 |
-| Detección de células | 2.184 detectadas: 2.125 aciertos, 59 de más, 182 sin detectar. Precisión 0,973 · sensibilidad 0,921 · **F1 0,946** |
-| Clasificación (199 parasitadas y 1.926 sanas emparejadas) | Precisión 0,911 · sensibilidad 0,824 · especificidad 0,992 · **F1 0,865** |
-| Detección final de parasitadas (de punta a punta) | 211 parasitadas en el GT (sin las del borde) y 184 marcadas: 166 bien encontradas, 18 de más, 45 perdidas. Precisión 0,902 · sensibilidad 0,787 · **F1 0,841** |
-| Parasitemia (promedio por imagen) | Estimada 8,88 % contra real 9,75 % · **error medio 1,3 puntos** por imagen |
+| Detección de células | 2.184 detectadas: 2.125 aciertos, 59 de más, 182 sin detectar. Precisión 0,973 · recall 0,921 · **F1 0,946** |
+| Clasificación (199 parasitadas y 1.926 sanas emparejadas) | Precisión 0,911 · recall 0,824 · especificidad 0,992 · **F1 0,865** |
+| Detección final de parasitadas (de punta a punta) | 211 parasitadas en el GT (sin las del borde) y 184 marcadas: 166 bien encontradas, 18 de más, 45 perdidas. Precisión 0,902 · recall 0,787 · **F1 0,841** |
+| Parasitemia (los 6 pacientes están infectados) | **Error absoluto medio por imagen 1,33 puntos**. Detalle por paciente en la tabla "Resultados por paciente" (sección 15b). |
 
 F1 de la clasificación por paciente: 208 → 0,88 · 209 → 0,89 · 211 → 0,89 · 212 → 0,75 · **263 → 0,00** · 282 → 0,86.
 
@@ -370,17 +383,18 @@ Lo que se imprimió quedó guardado en `data/shared/pred/resultados_test/resumen
 
 ### Comparación train – test
 
-Entre corchetes, el intervalo de confianza del 95 % (Wilson).
+P = precisión, R = recall. Entre corchetes, el intervalo de confianza del 95 % (Wilson).
 
 | Etapa | Train | **Test** |
 |---|---|---|
 | Segmentación (IoU / Dice) | 0,822 / 0,902 | **0,821 / 0,902** |
-| Detección de células (F1) | 0,946 (P 0,973 · S 0,921) | **0,963** (P 0,976 · S 0,950 [0,93–0,96]) |
-| Clasificación, color Y textura (F1) | 0,865 (P 0,911 · S 0,824) | **0,791** (P 0,739 [0,54–0,87] · S 0,850 [0,64–0,95]) |
-| Clasificación, solo color (F1, referencia) | 0,832 (P 0,777 · S 0,894) | 0,690 (P 0,526 · S 1,000) |
+| Detección de células (F1) | 0,946 (P 0,973 · R 0,921) | **0,963** (P 0,976 · R 0,950 [0,93–0,96]) |
+| Clasificación, color Y textura (F1) | 0,865 (P 0,911 · R 0,824) | **0,791** (P 0,739 [0,54–0,87] · R 0,850 [0,64–0,95]) |
+| Clasificación, solo color (F1, referencia) | 0,832 (P 0,777 · R 0,894) | 0,690 (P 0,526 · R 1,000) |
 | Especificidad de la clasificación | 0,992 | **0,993** |
-| Detección final de parasitadas (F1) | 0,841 (P 0,902 · S 0,787: 166 de 211) | **0,708** (P 0,680 · S 0,739: **17 de 23** [0,54–0,87]) |
-| Parasitemia: error medio por imagen | 1,33 puntos | **0,85 puntos** |
+| Detección final de parasitadas (F1) | 0,841 (P 0,902 · R 0,787: 166 de 211) | **0,708** (P 0,680 · R 0,739: **17 de 23** [0,54–0,87]) |
+| Parasitemia, pacientes infectados: error absoluto medio por imagen | 1,33 puntos | **0,66 puntos** |
+| Parasitemia, paciente sano: parasitemia falsa | — (no hay sanos en train) | **1,04 %** (1,37 % y 0,72 %) |
 
 ### Por imagen
 
@@ -390,6 +404,30 @@ Entre corchetes, el intervalo de confianza del 95 % (Wilson).
 | 162504 | 231 | 6,2 % | 7,4 % | 0 | 2 |
 | 105834 | 305 (sano) | 1,4 % | 0,0 % | 4 | – |
 | 110230 | 305 (sano) | 0,7 % | 0,0 % | 2 | – |
+
+### Resultados por paciente: células parasitadas y parasitemia (train y test)
+
+| Conjunto | Paciente | Estado | Eritrocitos detectados | Parasitadas en el GT | Marcadas como parasitadas | Bien detectadas | Marcadas de más | Perdidas | Parasitemia estimada (%) | Parasitemia real (%) | Error medio por imagen (puntos) |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Train | 208 | infectado | 420 | 21 | 17 | 15 | 2 | 6 | 3,88 | 4,05 | 0,76 |
+| Train | 209 | infectado | 389 | 140 | 122 | 115 | 7 | 25 | 31,37 | 34,91 | 3,54 |
+| Train | 211 | infectado | 220 | 36 | 32 | 30 | 2 | 6 | 14,57 | 15,82 | 1,24 |
+| Train | 212 | infectado | 439 | 5 | 4 | 3 | 1 | 2 | 0,83 | 0,96 | 0,34 |
+| Train | 263 | infectado | 484 | 5 | 5 | 0 | 5 | 5 | 0,97 | 1,05 | 1,24 |
+| Train | 282 | infectado | 232 | 4 | 4 | 3 | 1 | 1 | 1,65 | 1,74 | 0,88 |
+| **Train** | **Total** | | **2.184** | **211** | **184** | **166** | **18** | **45** | | | **1,33** |
+| Test | 231 | infectado | 389 | 23 | 19 | 17 | 2 | 6 | 4,89 | 5,55 | 0,66 |
+| Test | 305 | sano | 569 | 0 | 6 | 0 | 6 | 0 | 1,04 | 0,00 | 1,04 (parasitemia falsa) |
+| **Test** | **Total** | | **958** | **23** | **25** | **17** | **8** | **6** | | | |
+
+*Parasitemia: promedio de las 2 imágenes del paciente. Bien detectadas: marcadas que coinciden con una parasitada del GT (IoU ≥ 0,5). Marcadas de más: marcadas que no son ninguna parasitada del GT. Perdidas: parasitadas del GT que no se segmentaron o se clasificaron como sanas. Las parasitadas del GT no incluyen las del borde. Los totales de bien detectadas, de más y perdidas son los de la detección final (train F1 0,841; test F1 0,708). En test no se da un error medio total porque mezclaría un paciente infectado con uno sano.*
+
+**Lectura:**
+- **Parasitemia alta o media (209, 211, 208, 231):** el sistema encuentra la mayoría de las parasitadas (entre 71 % y 83 %), con pocas marcadas de más, y la parasitemia estimada sigue a la real.
+- **Tiende a subestimar:** en 10 de las 14 imágenes de pacientes infectados la estimada queda por debajo de la real, porque se pierden más parasitadas de las que se marcan de más. Es coherente con la regla AND, que prioriza la precisión.
+- **El error más grande en puntos es el del paciente 209** (3,5 puntos), pero es el de parasitemia más alta (alrededor del 35 %): en proporción, el error es de alrededor del 10 %.
+- **Parasitemia muy baja (212, 263, 282, con 4 o 5 parasitadas):** la parasitemia estimada se parece a la real, pero con tan pocas células el resultado depende de cada una. **El paciente 263 muestra por qué hay que mirar las células y no solo el porcentaje:** su parasitemia parece correcta (0,97 % contra 1,05 %), pero ninguna de las 5 células marcadas es una de las 5 parasitadas reales. Los errores se compensan.
+- **Paciente sano (305):** con la tinción distinta marca 6 de 569 eritrocitos, y da una **parasitemia falsa de alrededor del 1 %** en lugar de 0 %.
 
 De las 23 parasitadas de test: **3 se pierden en la segmentación** (no quedan como célula detectada), **3 se clasifican como sanas** y **17 se detectan bien**. Además, el sistema marcó 8 células de más: las 6 sanas del paciente 305 y 2 objetos que no son ninguna parasitada del GT. Esos 17 / 8 / 6 son los de la detección final (F1 0,708).
 
@@ -401,8 +439,8 @@ De las 23 parasitadas de test: **3 se pierden en la segmentación** (no quedan c
    - **todos los falsos positivos (6) están en el paciente sano (305)**. Sus imágenes tienen una **tinción muy distinta a la de train**: gris azulada y pálida, contra rosada (ver la figura). Con otra tinción aparecen manchas oscuras que no son parásitos (por ejemplo, plaquetas o restos apoyados sobre un eritrocito).
 3. **El F1 de 0,000 del paciente 305 no significa que falló todo:** ese paciente no tiene parasitadas, así que el F1 no está definido. Lo que importa es que marcó **6 de 566 eritrocitos (1 %)**, y la parasitemia estimada fue 1,4 % y 0,7 % en vez de 0 %.
 4. **Test confirma la decisión de combinar color y textura.** Con solo color, el paciente sano habría tenido el triple de falsos positivos (18 en total contra 6) y el F1 caería a 0,690. La textura vuelve a eliminar la mayoría de los falsos positivos, igual que en train.
-5. **La parasitemia se estima bien:** error medio de 0,85 puntos por imagen. En el paciente infectado queda a menos de 1,2 puntos de la real.
-6. **Incertidumbre:** con 23 parasitadas, los intervalos de confianza son anchos. Por ejemplo, la sensibilidad de punta a punta (74 %) podría estar entre 54 % y 87 %. Por eso test se toma como **una confirmación de que el método generaliza**, no como una medida exacta.
+5. **La parasitemia se estima bien en el paciente infectado:** error absoluto medio de 0,66 puntos por imagen (3,57 % contra 3,76 % y 6,22 % contra 7,35 %), con una leve subestimación, igual que en train. En el paciente sano da una parasitemia falsa de alrededor del 1 %. *El error medio de las 4 imágenes juntas (0,85 puntos) mezcla los dos casos, por eso se informan por separado.*
+6. **Incertidumbre:** con 23 parasitadas, los intervalos de confianza son anchos. Por ejemplo, la recall de punta a punta (74 %) podría estar entre 54 % y 87 %. Por eso test se toma como **una confirmación de que el método generaliza**, no como una medida exacta.
 
 **Implicancia clínica:** el sistema es útil para **estimar la parasitemia** en un paciente infectado, pero en un paciente sano con una tinción distinta puede dar una parasitemia baja (alrededor del 1 %) que no existe. Un resultado de ese orden debería confirmarse visualmente; la imagen de contornos sirve justamente para eso.
 
@@ -443,7 +481,7 @@ Registro de las pruebas que llevaron a cada decisión. **Varias se hicieron con 
 
 ### A.1. Otsu, K-means y GMM antes de Watershed
 
-| Método | IoU | Dice | Células aceptadas | TP | FP | FN | Precisión | Sensibilidad | F1 |
+| Método | IoU | Dice | Células aceptadas | TP | FP | FN | Precisión | Recall | F1 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | **Otsu** | **0,802** | **0,889** | 1.175 | 1.119 | 56 | 1.188 | 0,952 | **0,485** | **0,643** |
 | K-means | 0,801 | 0,887 | 776 | 758 | 18 | 1.549 | 0,977 | 0,329 | 0,492 |
@@ -455,7 +493,7 @@ En píxeles, Otsu y K-means son casi iguales. Pero Otsu detecta muchas más cél
 
 **Detección con Watershed, por método:**
 
-| Método | TP | FP | FN | Precisión | Sensibilidad | F1 |
+| Método | TP | FP | FN | Precisión | Recall | F1 |
 |---|---:|---:|---:|---:|---:|---:|
 | **Otsu** | 1.911 | 127 | 396 | **0,938** | 0,828 | **0,880** |
 | K-means | 1.875 | 286 | 432 | 0,868 | 0,813 | 0,839 |
@@ -465,7 +503,7 @@ Watershed mejoró mucho más a K-means y GMM, que unían más células, pero Ots
 
 **Relieve que se inunda (Otsu, mismos marcadores):**
 
-| Relieve | Precisión | Sensibilidad | F1 |
+| Relieve | Precisión | Recall | F1 |
 |---|---:|---:|---:|
 | **Distancia al fondo (elegido)** | 0,938 | 0,828 | **0,880** |
 | Sobel de G suavizado | 0,931 | 0,680 | 0,786 |
@@ -486,7 +524,7 @@ Al principio se usó 800–12.000 px y se aceptaban solo 618 objetos. Al medir e
 | Percentil 95 | 17.832 |
 | Percentil 99 | 19.536 |
 
-| Área mín. – máx. (px) | TP | FP | FN | Precisión | Sensibilidad | F1 |
+| Área mín. – máx. (px) | TP | FP | FN | Precisión | Recall | F1 |
 |---|---:|---:|---:|---:|---:|---:|
 | 800 – 12.000 (original) | 527 | 91 | 1.780 | 0,853 | 0,228 | 0,360 |
 | 800 – 20.000 | 1.110 | 103 | 1.197 | 0,915 | 0,481 | 0,631 |
@@ -520,7 +558,7 @@ Se probaron `HUECO_MAX` = 1.500, 2.800 y 4.086, con factores mínimos de 0,3 a 0
 
 *F1 de detección en train con `HUECO_MAX` = 4.086.*
 
-| Configuración | IoU | Dice | TP | FP | FN | Precisión | Sensibilidad | F1 |
+| Configuración | IoU | Dice | TP | FP | FN | Precisión | Recall | F1 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | Anterior (relleno 1.500; área fija 6.000 – 22.000) | 0,802 | 0,889 | 1.911 | 124 | 396 | 0,939 | 0,828 | 0,880 |
 | **Final (relleno 4.086; área 0,6 – 2,0 × típica)** | **0,822** | **0,902** | **2.125** | **59** | **182** | **0,973** | **0,921** | **0,946** |
@@ -542,12 +580,12 @@ Antes de tener las células segmentadas, la textura se exploró con los recortes
 
 *Un AUC cerca de 0 también separa bien: significa que el atributo es menor en las parasitadas.*
 
-| Regla (células del GT) | Sensibilidad | Especificidad | Precisión | F1 |
+| Regla (células del GT) | Recall | Especificidad | Precisión | F1 |
 |---|---:|---:|---:|---:|
 | contrast_d3 ≥ 0,596 (Youden) | 0,940 | 0,981 | 0,833 | 0,883 |
 | contrast_d3 ≥ 0,698 (máximo F1) | 0,894 | 0,990 | 0,898 | 0,896 |
 | correlation_d1 ≥ 0,944 (Youden) | 0,903 | 0,797 | 0,311 | 0,463 |
 | energy_d1 ≤ 0,418 (Youden) | 0,788 | 0,821 | 0,309 | 0,444 |
 
-- **Youden** maximiza sensibilidad + especificidad − 1. **Máximo F1** equilibra precisión y sensibilidad, y es más adecuado con clases desbalanceadas. Por eso el umbral final se eligió por máximo F1.
-- Con LOPO, `contrast_d3` sobre las células del GT dio sensibilidad 0,940, precisión 0,533 y F1 0,680: el umbral dependía del paciente. Por eso después se recalculó todo **sobre las células segmentadas** (sección 9), que son las que recibe el clasificador, y se combinó con el color (sección 11).
+- **Youden** maximiza recall + especificidad − 1. **Máximo F1** equilibra precisión y recall, y es más adecuado con clases desbalanceadas. Por eso el umbral final se eligió por máximo F1.
+- Con LOPO, `contrast_d3` sobre las células del GT dio recall 0,940, precisión 0,533 y F1 0,680: el umbral dependía del paciente. Por eso después se recalculó todo **sobre las células segmentadas** (sección 9), que son las que recibe el clasificador, y se combinó con el color (sección 11).

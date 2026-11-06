@@ -51,12 +51,12 @@ EVALUACION_FINAL = False  #va en falso hasta que terminemos todo: test no se cor
 CLASE_PARASITADA = "Parasitized"  #nombre de la clase parasitada en el GT
  
  
-#Función prf: precisión, sensibilidad y F1 a partir de TP, FP y FN (devuelve 0 si el denominador es 0).
+#Función prf: precisión, recall y F1 a partir de TP, FP y FN (devuelve 0 si el denominador es 0).
 def prf(tp, fp, fn):
     precision = tp / (tp + fp) if (tp + fp) else 0.0
-    sensibilidad = tp / (tp + fn) if (tp + fn) else 0.0
-    f1 = 2 * precision * sensibilidad / (precision + sensibilidad) if (precision + sensibilidad) else 0.0
-    return precision, sensibilidad, f1
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    return precision, recall, f1
  
  
 #Función procesar_imagen: recibe una imagen y le aplica todo el pipeline. No usa el GT, así que sirve para cualquier imagen nueva.
@@ -333,12 +333,11 @@ def main(split="train"):
  
     # Resumen de detección: IoU y Dice se promedian por imagen; TP, FP y FN se suman (cada célula pesa lo mismo)
     tp, fp, fn = tabla_metricas[["TP", "FP", "FN"]].sum()
-    precision, sensibilidad, f1 = prf(tp, fp, fn)
+    precision, recall, f1 = prf(tp, fp, fn)
  
     # Resumen de clasificación con el método elegido (sobre células con pareja en el GT)
-    tpc, fpc, fnc, tnc = tabla_metricas[["TP_cls", "FP_cls", "FN_cls", "TN_cls"]].sum()
+    tpc, fpc, fnc = tabla_metricas[["TP_cls", "FP_cls", "FN_cls"]].sum()
     prec_c, sens_c, f1_c = prf(tpc, fpc, fnc)
-    especificidad_c = tnc / (tnc + fpc) if (tnc + fpc) else 0.0  #de las sanas, cuántas se clasificaron como sanas
 
     # Detección final de células parasitadas (de punta a punta). Suma los errores de la segmentación y de la clasificación:
     # FP = sanas marcadas y objetos que no son ninguna parasitada; FN = parasitadas no detectadas o clasificadas como sanas
@@ -368,23 +367,24 @@ def main(split="train"):
     print(f"Métricas por imagen -> {ruta_metricas}")
     print(f"Clase del GT de cada célula -> {ruta_etiquetas}")
     print(f"Células parasitadas (mascaras/ e imagenes/, una por foto) -> {carpeta_parasitadas}")
-    # Resumen global, una etapa por renglón (todas las imágenes juntas)
+    # Resumen global, una etapa por renglón (todas las imágenes juntas).
+    # Se muestran recall y F1: recall dice cuántas se encontraron y F1 resume el equilibrio con lo marcado de más.
+    # TP, FP y FN quedan a la vista, así que la precisión se puede calcular si hace falta: TP / (TP + FP)
     conteo = tabla_etiquetas["clase_gt"].value_counts()
     print(f"\nRESULTADOS GLOBALES ({split.upper()}, {len(tabla_metricas)} imágenes) - clasificación: {decision['metodo']}")
     print(f"1. Segmentación (píxeles de eritrocito): IoU {tabla_metricas['IoU'].mean():.3f} | Dice {tabla_metricas['Dice'].mean():.3f}")
     print(f"2. Detección de eritrocitos individuales: {len(celulas_total)} detectados | TP {tp} | FP {fp} | FN {fn} | "
-          f"Precisión {precision:.3f} | Sensibilidad {sensibilidad:.3f} | F1 {f1:.3f}")
+          f"Recall {recall:.3f} | F1 {f1:.3f}")
     print(f"3. Clasificación (células bien detectadas: {conteo.get(CLASE_PARASITADA, 0)} parasitadas y {conteo.get('Uninfected', 0)} sanas): "
-          f"TP {tpc} | FP {fpc} | FN {fnc} | Precisión {prec_c:.3f} | Sensibilidad {sens_c:.3f} | "
-          f"Especificidad {especificidad_c:.3f} | F1 {f1_c:.3f}")
+          f"TP {tpc} | FP {fpc} | FN {fnc} | Recall {sens_c:.3f} | F1 {f1_c:.3f}")
     print(f"4. Detección final de células parasitadas ({tpf + fnf} parasitadas en el GT, {tpf + fpf} marcadas): "
-          f"TP {tpf} | FP {fpf} | FN {fnf} | Precisión {prec_f:.3f} | Sensibilidad {sens_f:.3f} | F1 {f1_f:.3f}")
+          f"TP {tpf} | FP {fpf} | FN {fnf} | Recall {sens_f:.3f} | F1 {f1_f:.3f}")
     print(f"5. Parasitemia (promedio por imagen): estimada {parasitemia_pred_media:.2f}% | real {parasitemia_gt_media:.2f}% | "
           f"error medio por imagen {error_parasitemia:.2f} puntos")
 
     # Referencias, para comparar (no son el resultado principal)
     print(f"\nReferencia - clasificación con la regla de color C5 sola: TP {tp5} | FP {fp5} | FN {fn5} | "
-          f"Precisión {prec_5:.3f} | Sensibilidad {sens_5:.3f} | F1 {f1_5:.3f}")
+          f"Recall {sens_5:.3f} | F1 {f1_5:.3f}")
     print("Referencia - F1 de clasificación por paciente: " + " | ".join(f"{pid} {v:.3f}" for pid, v in f1_pacientes.items()))
  
  
